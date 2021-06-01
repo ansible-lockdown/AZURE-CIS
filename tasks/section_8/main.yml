@@ -1,0 +1,5 @@
+---
+# 8  Other Security Considerations
+
+- name: "SECTION | 8 | Other Security Considerations"
+  include: cis_8.x.yml

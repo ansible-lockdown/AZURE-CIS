@@ -1,0 +1,5 @@
+---
+# 7 Virtual Machines
+
+- name: "SECTION | 7 | Virtual Machines"
+  include: cis_7.x.yml

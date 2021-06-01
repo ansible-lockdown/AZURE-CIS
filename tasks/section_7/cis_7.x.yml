@@ -1,0 +1,389 @@
+---
+# 7 Virtual Machines
+- name: SETUP | SECTION 7 | Azure Virtual Machine List
+  block:
+  - name: SETUP | SECTION 7 | Get Azure Virtual Machine List
+    command: "az vm list --subscription '{{ azure_service_principal.subscription_id }}'"
+    register: azure_vm_list_raw
+    changed_when: false
+
+  - name: SETUP | SECTION 7 | Get Azure Virtual Machine List
+    set_fact:
+      azure_vm_list: "{{ azure_vm_list_raw.stdout | from_json | default([],true) }}"
+
+  - name: SETUP | SECTION 7 | Set Exception Message
+    set_fact:
+      exception_evidence_message: "No Virtual Machines Exist"
+
+  when:
+    - azfcis_section7
+    - azfcis_rule_7_1 or
+      azfcis_rule_7_4 or
+      azfcis_rule_7_6 or
+      azfcis_rule_7_7
+  tags:
+    - level1
+    - section7
+    - rule_7.1
+    - rule_7.4
+    - rule_7.6
+    - rule_7.7
+
+
+- name: AUTOMATED | 7.1 | AUDIT | Ensure Virtual Machines are utilizing Managed Disks
+  block:
+  - name: AUTOMATED | 7.1 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "7.1"
+        level: "1"
+        title: Ensure Virtual Machines are utilizing Managed Disks
+
+  - name: "AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query"
+    set_fact:
+      evidence_query: "[] | [?storageProfile.osDisk.managedDisk.Id != `null`].{name:name,resourceGroup:resourceGroup,storageProfile:storageProfile}"
+
+  - name: "AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query"
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: "AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters"
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_vm_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_vm_list | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_vm_list | json_query(evidence_query) }}"
+
+  - name: "AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result"
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'Exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: "AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output"
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_7_1
+  tags:
+    - level1
+    - section7
+    - rule_7.1
+
+
+- name: AUTOMATED | 7.2 | AUDIT | Ensure that 'OS and Data' disks are encrypted with CMK
+  block:
+  - name: AUTOMATED | 7.2 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "7.2"
+        level: "2"
+        title: Ensure that 'OS and Data' disks are encrypted with CMK
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: See benchmark rule {{ this_rule.id }} documentation for manual audit and remediation procedures
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_7_2
+    - do_manual
+  tags:
+    - level2
+    - section7
+    - rule_7.2
+
+
+- name: AUTOMATED | 7.3 | AUDIT | Ensure that 'Unattached disks' are encrypted with CMK
+  block:
+  - name: AUTOMATED | 7.3 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "7.3"
+        level: "2"
+        title: Ensure that 'Unattached disks' are encrypted with CMK
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get Azure Disk List
+    command: "az disk list  --subscription {{ azure_service_principal.subscription_id }}"
+    register: azure_disk_list_raw
+    changed_when: false
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format Azure Disk List
+    set_fact:
+      azure_disk_list: "{{ azure_disk_list_raw.stdout | from_json }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[] | [?diskState == `Unattached` && encryption.diskEncryptionSetId == `null`]"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_disk_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_disk_list | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_disk_list | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ 'No Unattached disk found' if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_7_3
+  tags:
+    - level2
+    - section7
+    - rule_7.3
+
+
+- name: MANUAL | 7.4 | AUDIT | Ensure that only approved extensions are installed
+  block:
+  - name: MANUAL | 7.4 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "7.4"
+        level: "2"
+        title: Ensure that only approved extensions are installed
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get Virtual Machine Extension List
+    command: "az vm extension list --vm-name {{ item.name }} --resource-group {{ item.resourceGroup }} --subscription {{ azure_service_principal.subscription_id }}"
+    loop: "{{ azure_vm_list }}"
+    register: azure_vm_extension_list_raw
+    changed_when: false
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format Virtual Machine Extension List
+    set_fact:
+      #Filter out empty arrays with 'results[?stdout != `"[]"`].stdout'
+      azure_vm_extension_list: "{{ azure_vm_extension_list_raw | json_query('results[?stdout != `\"[]\"`].stdout') | map('from_json') | list }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[]"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_vm_extension_list  == []) | bool }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: See benchmark rule {{ this_rule.id }} documentation for manual audit and remediation procedures
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ 'No Virtual Machine Extensions exist' if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_7_4
+    - do_manual
+  tags:
+    - level2
+    - section7
+    - rule_7.4
+
+
+- name: MANUAL | 7.5 | AUDIT | Ensure that the latest OS Patches for all Virtual Machines are applied
+  block:
+  - name: MANUAL | 7.5 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "7.5"
+        level: "1"
+        title: Ensure that the latest OS Patches for all Virtual Machines are applied
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: See benchmark rule {{ this_rule.id }} documentation for manual audit and remediation procedures
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_7_5
+    - do_manual
+  tags:
+    - level1
+    - section7
+    - rule_7.5
+
+
+- name: MANUAL | 7.6 | AUDIT | Ensure that the endpoint protection for all Virtual Machines is installed
+  block:
+  - name: MANUAL | 7.6 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "7.6"
+        level: "1"
+        title: Ensure that the endpoint protection for all Virtual Machines is installed
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get Virtual Machine Extension List
+    command: "az vm show --name {{ item.name }} --resource-group {{ item.resourceGroup }} --subscription {{ azure_service_principal.subscription_id }} --show-details"
+    loop: "{{ azure_vm_list }}"
+    register: azure_vm_show_raw
+    changed_when: false
+    when: "(azure_vm_list  != []) | bool"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format Virtual Machine Extension List
+    set_fact:
+      azure_vm_show: '{{ azure_vm_show_raw | json_query("results[*].stdout") | map("from_json") | list }}'
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[].{name:name,resources:resources}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_vm_list  == []) | bool }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: "{{ azure_vm_show | json_query(evidence_query) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_7_6
+    - do_manual
+  tags:
+    - level1
+    - section7
+    - rule_7.6
+
+
+- name: MANUAL | 7.7 | AUDIT | Ensure that VHD's are encrypted
+  block:
+  - name: MANUAL | 7.7 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "7.7"
+        level: "2"
+        title: Ensure that VHD's are encrypted
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: []
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ (this_rule.test.evidence | default(None)) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_7_7
+    - do_manual
+  tags:
+    - level1
+    - section7
+    - rule_7.7

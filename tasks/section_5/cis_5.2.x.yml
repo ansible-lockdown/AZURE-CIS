@@ -1,0 +1,853 @@
+---
+#### 5.2 Monitoring using Activity Log Alerts
+- name: SETUP | SECTION 5 | Microsoft Azure Access Token
+  block: 
+  - name: SETUP | SECTION 5 | Request Azure Access Token
+    command: az account get-access-token --subscription {{ azure_service_principal.subscription_id }}
+    register: request_azure_access_token_output
+    changed_when: false
+
+  - name: SETUP | SECTION 5 | Extract Azure Authorization Header and Subscription Id
+    set_fact:
+      azure_auth_header: Bearer {{ (request_azure_access_token_output.stdout | from_json).accessToken }}
+      azure_auth_token: "{{ (request_azure_access_token_output.stdout | from_json).accessToken }}"
+      azure_subscription_id: "{{ (request_azure_access_token_output.stdout | from_json).subscription }}"
+
+  - name: SETUP | SECTION 5 | Get Activity Log Alerts
+    uri:
+      method: GET
+      url: "https://management.azure.com/subscriptions/{{ azure_service_principal.subscription_id }}/providers/microsoft.insights/activityLogAlerts?api-version=2017-04-01"
+      headers:
+        Authorization: "{{ azure_auth_header }}"
+        Content-Type: application/json
+    register: azure_activity_log_alerts_raw
+
+  - name: SETUP | SECTION 5 | Format Activity Log Alerts
+    set_fact:
+      azure_activity_log_alerts: "{{ azure_activity_log_alerts_raw.json.value }}"
+
+  - name: SETUP | SECTION 5 | Request Azure Access Token
+    command: az account get-access-token
+    register: request_azure_access_token_output
+    changed_when: false
+
+  - name: SETUP | SECTION 5 | Extract Azure Subscription ID and Access Token
+    set_fact:
+      azure_subscription_id: "{{ (request_azure_access_token_output.stdout | from_json).subscription }}"
+      azure_access_token: "{{ (request_azure_access_token_output.stdout | from_json).accessToken }}"
+
+  when:
+    - azfcis_section5
+    - azfcis_rule_5_2_1 or
+      azfcis_rule_5_2_2 or
+      azfcis_rule_5_2_3 or
+      azfcis_rule_5_2_4 or
+      azfcis_rule_5_2_5 or
+      azfcis_rule_5_2_6 or
+      azfcis_rule_5_2_7 or
+      azfcis_rule_5_2_8 or
+      azfcis_rule_5_2_9
+  tags:
+    - section5
+    - rule_5.2.1
+    - rule_5.2.2
+    - rule_5.2.3
+    - rule_5.2.4
+    - rule_5.2.5
+    - rule_5.2.6
+    - rule_5.2.7
+    - rule_5.2.8
+    - rule_5.2.9
+
+
+- name: AUTOMATED | 5.2.1 | AUDIT | Ensure that Activity Log Alert exists for Create Policy Assignment
+  block:
+  - name: AUTOMATED | 5.2.1 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "5.2.1"
+        level: "1"
+        title: Ensure that Activity Log Alert exists for Create Policy Assignment
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[] | [?location == `Global` && properties.enabled == `true` && contains(properties.scopes,`/subscriptions/{{ azure_service_principal.subscription_id }}`) && properties.condition.allOf[?equals == `Microsoft.Authorization/policyAssignments/write` && field == `operationName` && containsAny == `null`]]"
+  
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: "{{ azure_activity_log_alerts | json_query(source_query) | int >= 1 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_activity_log_alerts | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set API Parameters
+    set_fact:
+      api_parameters: 
+        alert_name: "{{ 'Alert | Create Policy Assignment' | urlencode() }}"
+        alert_condition: "Microsoft.Authorization/policyAssignments/write"
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Create Alert Rule
+    uri:
+      method: PUT
+      url: https://management.azure.com/subscriptions/{{ azure_subscription_id }}/resourceGroups/{{ azfcis_alert_rule_resource_group }}/providers/microsoft.insights/activityLogAlerts/{{ api_parameters.alert_name }}?api-version=2017-04-01
+      status_code: [200,201]
+      headers:
+        Authorization: Bearer {{ azure_access_token }}
+      return_content: yes
+      body_format: json
+      body:
+        location: Global
+        tags: {}
+        properties:
+          scopes:
+            - /subscriptions/{{ azure_subscription_id }}
+          condition:
+            allOf:
+              - field: category
+                equals: Administrative
+              - field: operationName
+                equals: "{{ api_parameters.alert_condition }}"
+          actions:
+            actionGroups:
+              - actionGroupId: /subscriptions/{{ azure_subscription_id }}/resourceGroups/{{ azfcis_alert_rule_resource_group }}/providers/microsoft.insights/actionGroups/{{ azfcis_alert_rule_action_group }}
+                webhookProperties: {}
+          enabled: true
+          description: "{{ this_rule.title }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_5_2_1
+  tags:
+    - level1
+    - section5
+    - rule_5.2.1
+
+
+- name: AUTOMATED | 5.2.2 | AUDIT | Ensure that Activity Log Alert exists for Delete Policy Assignment
+  block:
+  - name: AUTOMATED | 5.2.2 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "5.2.2"
+        level: "1"
+        title: Ensure that Activity Log Alert exists for Delete Policy Assignment
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[] | [?location == `Global` && properties.enabled == `true` && contains(properties.scopes,`/subscriptions/{{ azure_service_principal.subscription_id }}`) && properties.condition.allOf[?equals == `Microsoft.Authorization/policyAssignments/delete` && field == `operationName` && containsAny == `null`]]"
+  
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: "{{ azure_activity_log_alerts | json_query(source_query) | int >= 1 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_activity_log_alerts | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set API Parameters
+    set_fact:
+      api_parameters: 
+        alert_name: "{{ 'Alert | Delete Policy Assignment' | urlencode() }}"
+        alert_condition: "Microsoft.Authorization/policyAssignments/delete"
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Create Alert Rule
+    uri:
+      method: PUT
+      url: https://management.azure.com/subscriptions/{{ azure_subscription_id }}/resourceGroups/{{ azfcis_alert_rule_resource_group }}/providers/microsoft.insights/activityLogAlerts/{{ api_parameters.alert_name }}?api-version=2017-04-01
+      status_code: [200,201]
+      headers:
+        Authorization: Bearer {{ azure_access_token }}
+      return_content: yes
+      body_format: json
+      body:
+        location: Global
+        tags: {}
+        properties:
+          scopes:
+            - /subscriptions/{{ azure_subscription_id }}
+          condition:
+            allOf:
+              - field: category
+                equals: Administrative
+              - field: operationName
+                equals: "{{ api_parameters.alert_condition }}"
+          actions:
+            actionGroups:
+              - actionGroupId: /subscriptions/{{ azure_subscription_id }}/resourceGroups/{{ azfcis_alert_rule_resource_group }}/providers/microsoft.insights/actionGroups/{{ azfcis_alert_rule_action_group }}
+                webhookProperties: {}
+          enabled: true
+          description: "{{ this_rule.title }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_5_2_2
+  tags:
+    - level1
+    - section5
+    - rule_5.2.2
+
+
+- name: AUTOMATED | 5.2.3 | AUDIT | Ensure that Activity Log Alert exists for Create or Update Network Security Group
+  block:
+  - name: AUTOMATED | 5.2.3 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "5.2.3"
+        level: "1"
+        title: Ensure that Activity Log Alert exists for Create or Update Network Security Group
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[] | [?location == `Global` && properties.enabled == `true` && contains(properties.scopes,`/subscriptions/{{ azure_service_principal.subscription_id }}`) && properties.condition.allOf[?equals == `Microsoft.Network/networkSecurityGroups/write` && field == `operationName` && containsAny == `null`]]"
+  
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: "{{ azure_activity_log_alerts | json_query(source_query) | int >= 1 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_activity_log_alerts | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set API Parameters
+    set_fact:
+      api_parameters: 
+        alert_name: "{{ 'Alert | Create or Update Network Security Group' | urlencode() }}"
+        alert_condition: "Microsoft.Network/networkSecurityGroups/write"
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Create Alert Rule
+    uri:
+      method: PUT
+      url: https://management.azure.com/subscriptions/{{ azure_subscription_id }}/resourceGroups/{{ azfcis_alert_rule_resource_group }}/providers/microsoft.insights/activityLogAlerts/{{ api_parameters.alert_name }}?api-version=2017-04-01
+      status_code: [200,201]
+      headers:
+        Authorization: Bearer {{ azure_access_token }}
+      return_content: yes
+      body_format: json
+      body:
+        location: Global
+        tags: {}
+        properties:
+          scopes:
+            - /subscriptions/{{ azure_subscription_id }}
+          condition:
+            allOf:
+              - field: category
+                equals: Administrative
+              - field: operationName
+                equals: "{{ api_parameters.alert_condition }}"
+          actions:
+            actionGroups:
+              - actionGroupId: /subscriptions/{{ azure_subscription_id }}/resourceGroups/{{ azfcis_alert_rule_resource_group }}/providers/microsoft.insights/actionGroups/{{ azfcis_alert_rule_action_group }}
+                webhookProperties: {}
+          enabled: true
+          description: "{{ this_rule.title }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_5_2_3
+  tags:
+    - level1
+    - section5
+    - rule_5.2.3
+
+
+- name: AUTOMATED | 5.2.4 | AUDIT | Ensure that Activity Log Alert exists for Delete Network Security Group
+  block:
+  - name: AUTOMATED | 5.2.4 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "5.2.4"
+        level: "1"
+        title: Ensure that Activity Log Alert exists for Delete Network Security Group
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[] | [?location == `Global` && properties.enabled == `true` && contains(properties.scopes,`/subscriptions/{{ azure_service_principal.subscription_id }}`) && properties.condition.allOf[?equals == `Microsoft.Network/networkSecurityGroups/delete` && field == `operationName` && containsAny == `null`]]"
+  
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: "{{ azure_activity_log_alerts | json_query(source_query) | int >= 1 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_activity_log_alerts | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set API Parameters
+    set_fact:
+      api_parameters: 
+        alert_name: "{{ 'Alert | Delete Network Security Group' | urlencode() }}"
+        alert_condition: "Microsoft.Network/networkSecurityGroups/delete"
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Create Alert Rule
+    uri:
+      method: PUT
+      url: https://management.azure.com/subscriptions/{{ azure_subscription_id }}/resourceGroups/{{ azfcis_alert_rule_resource_group }}/providers/microsoft.insights/activityLogAlerts/{{ api_parameters.alert_name }}?api-version=2017-04-01
+      status_code: [200,201]
+      headers:
+        Authorization: Bearer {{ azure_access_token }}
+      return_content: yes
+      body_format: json
+      body:
+        location: Global
+        tags: {}
+        properties:
+          scopes:
+            - /subscriptions/{{ azure_subscription_id }}
+          condition:
+            allOf:
+              - field: category
+                equals: Administrative
+              - field: operationName
+                equals: "{{ api_parameters.alert_condition }}"
+          actions:
+            actionGroups:
+              - actionGroupId: /subscriptions/{{ azure_subscription_id }}/resourceGroups/{{ azfcis_alert_rule_resource_group }}/providers/microsoft.insights/actionGroups/{{ azfcis_alert_rule_action_group }}
+                webhookProperties: {}
+          enabled: true
+          description: "{{ this_rule.title }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_5_2_4
+  tags:
+    - level1
+    - section5
+    - rule_5.2.4
+
+
+- name: AUTOMATED | 5.2.5 | AUDIT | Ensure that Activity Log Alert exists for Create or Update Network Security Group Rule
+  block:
+  - name: AUTOMATED | 5.2.5 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "5.2.5"
+        level: "1"
+        title: Ensure that Activity Log Alert exists for Create or Update Network Security Group Rule
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[] | [?location == `Global` && properties.enabled == `true` && contains(properties.scopes,`/subscriptions/{{ azure_service_principal.subscription_id }}`) && properties.condition.allOf[?equals == `Microsoft.Network/networkSecurityGroups/securityRules/write` && field == `operationName` && containsAny == `null`]]"
+  
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: "{{ azure_activity_log_alerts | json_query(source_query) | int >= 1 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_activity_log_alerts | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set API Parameters
+    set_fact:
+      api_parameters: 
+        alert_name: "{{ 'Alert | Create or Update Network Security Group Rule' | urlencode() }}"
+        alert_condition: "Microsoft.Network/networkSecurityGroups/securityRules/write"
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Create Alert Rule
+    uri:
+      method: PUT
+      url: https://management.azure.com/subscriptions/{{ azure_subscription_id }}/resourceGroups/{{ azfcis_alert_rule_resource_group }}/providers/microsoft.insights/activityLogAlerts/{{ api_parameters.alert_name }}?api-version=2017-04-01
+      status_code: [200,201]
+      headers:
+        Authorization: Bearer {{ azure_access_token }}
+      return_content: yes
+      body_format: json
+      body:
+        location: Global
+        tags: {}
+        properties:
+          scopes:
+            - /subscriptions/{{ azure_subscription_id }}
+          condition:
+            allOf:
+              - field: category
+                equals: Administrative
+              - field: operationName
+                equals: "{{ api_parameters.alert_condition }}"
+          actions:
+            actionGroups:
+              - actionGroupId: /subscriptions/{{ azure_subscription_id }}/resourceGroups/{{ azfcis_alert_rule_resource_group }}/providers/microsoft.insights/actionGroups/{{ azfcis_alert_rule_action_group }}
+                webhookProperties: {}
+          enabled: true
+          description: "{{ this_rule.title }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_5_2_5
+  tags:
+    - level1
+    - section5
+    - rule_5.2.5
+
+
+- name: AUTOMATED | 5.2.6 | AUDIT | Ensure that activity log alert exists for the Delete Network Security Group Rule
+  block:
+  - name: AUTOMATED | 5.2.6 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "5.2.6"
+        level: "1"
+        title: Ensure that activity log alert exists for the Delete Network Security Group Rule
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[] | [?location == `Global` && properties.enabled == `true` && contains(properties.scopes,`/subscriptions/{{ azure_service_principal.subscription_id }}`) && properties.condition.allOf[?equals == `Microsoft.Network/networkSecurityGroups/securityRules/delete` && field == `operationName` && containsAny == `null`]]"
+  
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: "{{ azure_activity_log_alerts | json_query(source_query) | int >= 1 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_activity_log_alerts | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set API Parameters
+    set_fact:
+      api_parameters: 
+        alert_name: "{{ 'Alert | Delete Network Security Group Rule' | urlencode() }}"
+        alert_condition: "Microsoft.Network/networkSecurityGroups/securityRules/delete"
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Create Alert Rule
+    uri:
+      method: PUT
+      url: https://management.azure.com/subscriptions/{{ azure_subscription_id }}/resourceGroups/{{ azfcis_alert_rule_resource_group }}/providers/microsoft.insights/activityLogAlerts/{{ api_parameters.alert_name }}?api-version=2017-04-01
+      status_code: [200,201]
+      headers:
+        Authorization: Bearer {{ azure_access_token }}
+      return_content: yes
+      body_format: json
+      body:
+        location: Global
+        tags: {}
+        properties:
+          scopes:
+            - /subscriptions/{{ azure_subscription_id }}
+          condition:
+            allOf:
+              - field: category
+                equals: Administrative
+              - field: operationName
+                equals: "{{ api_parameters.alert_condition }}"
+          actions:
+            actionGroups:
+              - actionGroupId: /subscriptions/{{ azure_subscription_id }}/resourceGroups/{{ azfcis_alert_rule_resource_group }}/providers/microsoft.insights/actionGroups/{{ azfcis_alert_rule_action_group }}
+                webhookProperties: {}
+          enabled: true
+          description: "{{ this_rule.title }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_5_2_6
+  tags:
+    - level1
+    - section5
+    - rule_5.2.6
+
+
+- name: AUTOMATED | 5.2.7 | AUDIT | Ensure that Activity Log Alert exists for Create or Update Security Solution
+  block:
+  - name: AUTOMATED | 5.2.7 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "5.2.7"
+        level: "1"
+        title: Ensure that Activity Log Alert exists for Create or Update Security Solution
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[] | [?location == `Global` && properties.enabled == `true` && contains(properties.scopes,`/subscriptions/{{ azure_service_principal.subscription_id }}`) && properties.condition.allOf[?equals == `Microsoft.Security/securitySolutions/write` && field == `operationName` && containsAny == `null`]]"
+  
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: "{{ azure_activity_log_alerts | json_query(source_query) | int >= 1 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_activity_log_alerts | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set API Parameters
+    set_fact:
+      api_parameters: 
+        alert_name: "{{ 'Alert | Create or Update Security Solution' | urlencode() }}"
+        alert_condition: "Microsoft.Security/securitySolutions/write"
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Create Alert Rule
+    uri:
+      method: PUT
+      url: https://management.azure.com/subscriptions/{{ azure_subscription_id }}/resourceGroups/{{ azfcis_alert_rule_resource_group }}/providers/microsoft.insights/activityLogAlerts/{{ api_parameters.alert_name }}?api-version=2017-04-01
+      status_code: [200,201]
+      headers:
+        Authorization: Bearer {{ azure_access_token }}
+      return_content: yes
+      body_format: json
+      body:
+        location: Global
+        tags: {}
+        properties:
+          scopes:
+            - /subscriptions/{{ azure_subscription_id }}
+          condition:
+            allOf:
+              - field: category
+                equals: Administrative
+              - field: operationName
+                equals: "{{ api_parameters.alert_condition }}"
+          actions:
+            actionGroups:
+              - actionGroupId: /subscriptions/{{ azure_subscription_id }}/resourceGroups/{{ azfcis_alert_rule_resource_group }}/providers/microsoft.insights/actionGroups/{{ azfcis_alert_rule_action_group }}
+                webhookProperties: {}
+          enabled: true
+          description: "{{ this_rule.title }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_5_2_7
+  tags:
+    - level1
+    - section5
+    - rule_5.2.7
+
+
+- name: AUTOMATED | 5.2.8 | AUDIT | Ensure that Activity Log Alert exists for Delete Security Solution
+  block:
+  - name: AUTOMATED | 5.2.8 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "5.2.8"
+        level: "1"
+        title: Ensure that Activity Log Alert exists for Delete Security Solution
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[] | [?location == `Global` && properties.enabled == `true` && contains(properties.scopes,`/subscriptions/{{ azure_service_principal.subscription_id }}`) && properties.condition.allOf[?equals == `Microsoft.Security/securitySolutions/delete` && field == `operationName` && containsAny == `null`]]"
+  
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: "{{ azure_activity_log_alerts | json_query(source_query) | int >= 1 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_activity_log_alerts | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set API Parameters
+    set_fact:
+      api_parameters: 
+        alert_name: "{{ 'Alert | Delete Security Solution' | urlencode() }}"
+        alert_condition: "Microsoft.Security/securitySolutions/delete"
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Create Alert Rule
+    uri:
+      method: PUT
+      url: https://management.azure.com/subscriptions/{{ azure_subscription_id }}/resourceGroups/{{ azfcis_alert_rule_resource_group }}/providers/microsoft.insights/activityLogAlerts/{{ api_parameters.alert_name }}?api-version=2017-04-01
+      status_code: [200,201]
+      headers:
+        Authorization: Bearer {{ azure_access_token }}
+      return_content: yes
+      body_format: json
+      body:
+        location: Global
+        tags: {}
+        properties:
+          scopes:
+            - /subscriptions/{{ azure_subscription_id }}
+          condition:
+            allOf:
+              - field: category
+                equals: Administrative
+              - field: operationName
+                equals: "{{ api_parameters.alert_condition }}"
+          actions:
+            actionGroups:
+              - actionGroupId: /subscriptions/{{ azure_subscription_id }}/resourceGroups/{{ azfcis_alert_rule_resource_group }}/providers/microsoft.insights/actionGroups/{{ azfcis_alert_rule_action_group }}
+                webhookProperties: {}
+          enabled: true
+          description: "{{ this_rule.title }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_5_2_8
+  tags:
+    - level1
+    - section5
+    - rule_5.2.8
+
+
+
+- name: AUTOMATED | 5.2.9 | AUDIT | Ensure that Activity Log Alert exists for Create or Update or Delete SQL Server Firewall Rule
+  block:
+  - name: AUTOMATED | 5.2.9 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "5.2.9"
+        level: "1"
+        title: Ensure that Activity Log Alert exists for Create or Update or Delete SQL Server Firewall Rule
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[] | [?location == `Global` && properties.enabled == `true` && contains(properties.scopes,`/subscriptions/{{ azure_service_principal.subscription_id }}`) && properties.condition.allOf[?equals == `Microsoft.Sql/servers/firewallRules/write` && field == `operationName` && containsAny == `null`]]"
+  
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: "{{ azure_activity_log_alerts | json_query(source_query) | int >= 1 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_activity_log_alerts | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set API Parameters
+    set_fact:
+      api_parameters: 
+        alert_name: "{{ 'Alert | Create or Update or Delete SQL Server Firewall Rule' | urlencode() }}"
+        alert_condition: "Microsoft.Sql/servers/firewallRules/write"
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Create Alert Rule
+    uri:
+      method: PUT
+      url: https://management.azure.com/subscriptions/{{ azure_subscription_id }}/resourceGroups/{{ azfcis_alert_rule_resource_group }}/providers/microsoft.insights/activityLogAlerts/{{ api_parameters.alert_name }}?api-version=2017-04-01
+      status_code: [200,201]
+      headers:
+        Authorization: Bearer {{ azure_access_token }}
+      return_content: yes
+      body_format: json
+      body:
+        location: Global
+        tags: {}
+        properties:
+          scopes:
+            - /subscriptions/{{ azure_subscription_id }}
+          condition:
+            allOf:
+              - field: category
+                equals: Administrative
+              - field: operationName
+                equals: "{{ api_parameters.alert_condition }}"
+          actions:
+            actionGroups:
+              - actionGroupId: /subscriptions/{{ azure_subscription_id }}/resourceGroups/{{ azfcis_alert_rule_resource_group }}/providers/microsoft.insights/actionGroups/{{ azfcis_alert_rule_action_group }}
+                webhookProperties: {}
+          enabled: true
+          description: "{{ this_rule.title }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_5_2_9
+  tags:
+    - level1
+    - section5
+    - rule_5.2.9

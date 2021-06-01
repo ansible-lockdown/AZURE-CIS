@@ -1,0 +1,45 @@
+---
+# ansible.posix ?
+# community.general ?
+- name: PREREQ | Import the Microsoft repository key
+  rpm_key:
+    state: present
+    key: https://packages.microsoft.com/keys/microsoft.asc
+  changed_when: false
+
+
+- name: PREREQ | Create local azure-cli repository information.
+  copy:
+    dest: "/etc/yum.repos.d/azure-cli.repo"
+    content: |
+      [azure-cli]
+      name=Azure CLI
+      baseurl=https://packages.microsoft.com/yumrepos/azure-cli
+      enabled=1
+      gpgcheck=1
+      gpgkey=https://packages.microsoft.com/keys/microsoft.asc
+  changed_when: false
+
+
+- name: PREREQ | Yum Installs
+  yum:
+    name: "{{ packages }}"
+    state: present
+  become: yes
+  changed_when: false
+  vars:
+    packages:
+    - azure-cli-2.23.0
+    - jq
+    - https://github.com/PowerShell/PowerShell/releases/download/v7.1.3/powershell-7.1.3-1.rhel.7.x86_64.rpm
+
+
+- name: PREREQ | Install PowerShell Core Modules
+  shell: |
+    Install-Module -Name 'Az.Accounts' -RequiredVersion '2.3.0' -Scope 'AllUsers' -Force
+    Install-Module -Name 'Az.Sql'      -RequiredVersion '3.1.0' -Scope 'AllUsers' -Force
+  args:
+    executable: /usr/bin/pwsh
+  register: install_az_module
+  changed_when: false
+  become: yes

@@ -1,0 +1,64 @@
+---
+- name: AUTOMATED | 5.3 | AUDIT | Ensure that Diagnostic Logs are enabled for all services which support it.
+  block:
+  - name: AUTOMATED | 5.3 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "5.3"
+        level: "1"
+        title: Ensure that Diagnostic Logs are enabled for all services which support it.
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get Azure Resource List
+    command: az resource list  --subscription {{ azure_service_principal.subscription_id }}
+    register: azure_resource_list_raw
+    changed_when: false
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format Azure Resource List
+    set_fact:
+      azure_resource_list: "{{ azure_resource_list_raw.stdout | from_json | default([],true) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get Azure Monitor Diagnostics Settings List
+    shell: "az monitor diagnostic-settings list --resource {{ item.id }} --subscription {{ azure_service_principal.subscription_id }} | jq '.id=\"{{ item.id }}\"'"
+    loop: "{{ azure_resource_list }}"
+    register: azure_monitor_diagnostic_settings_list_all_raw
+    changed_when: false
+    when: 
+      - (item.type | lower) in resource_logs_categories
+      - (azure_resource_list  != []) | bool
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format Azure Monitor Diagnostics Settings List
+    set_fact:
+      azure_monitor_diagnostic_settings_list_all: "{{ azure_monitor_diagnostic_settings_list_all_raw | json_query('results[?stdout != `\"\"`].stdout') | map('from_json') | list | default([],true) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_monitor_diagnostic_settings_list_all  == []) | bool }}"
+        test: 
+          source: "{{ azure_monitor_diagnostic_settings_list_all | json_query('length([] | [?value == `[]`])') | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_monitor_diagnostic_settings_list_all | json_query('[] | [?value == `[]`]') }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ 'No Resources Exist that Support Diagnostic Logs' if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_5_3
+  tags:
+    - level1
+    - section5
+    - rule_5.3

@@ -1,0 +1,14 @@
+- name: FINAL | Write 'rule_results' object to file
+  copy:
+    content: "{{ rule_results | default([]) | to_nice_json }}"
+    dest: "{{ rule_results_path }}"
+  changed_when: false
+  when: azfcis_write_rule_results
+  tags:
+    - always
+
+- name: FINAL | Show 'rule_results' Object
+  debug:
+    msg: "{{ rule_results | default([]) }}"
+  tags:
+    - always

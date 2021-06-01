@@ -1,0 +1,4 @@
+---
+
+- name: "SECTION | 3 | Storage Accounts"
+  include: cis_3.x.yml

@@ -1,0 +1,391 @@
+---
+# 6 Networking
+- name: SETUP | SECTION 6 | Set Evidence Message
+  set_fact:
+    exception_evidence_message: "No Network Security Groups Exist"
+
+- name: SETUP | SECTION 6 | Azure Network Security Group List
+  block:
+  - name: SETUP | SECTION 6 | Get Azure Network Security Group List
+    command: az network nsg list  --subscription {{ azure_service_principal.subscription_id }}
+    register: azure_network_nsg_list_raw
+    changed_when: false
+
+  - name: SETUP | SECTION 6 | Format Azure Network Security Group List
+    set_fact:
+      azure_network_nsg_list: "{{ azure_network_nsg_list_raw.stdout | from_json | json_query(' [*].{name:name,securityRules:securityRules,resourceGroup:resourceGroup} ') | default([],true) }}"
+
+  when:
+    - azfcis_section6
+    - azfcis_rule_6_1 or
+      azfcis_rule_6_2 or
+      azfcis_rule_6_4 or
+      azfcis_rule_6_6
+  tags:
+    - section5
+    - rule_6.1
+    - rule_6.2
+    - rule_6.4
+    - rule_6.6
+
+
+- name: AUTOMATED | 6.1 | AUDIT | Ensure that RDP access is restricted from the internet
+  block:
+  - name: AUTOMATED | 6.1 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "6.1"
+        level: "1"
+        title: Ensure that RDP access is restricted from the internet
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[] | [?securityRules[?access== `Allow` && protocol==`Tcp` && direction==`Inbound` && (sourceAddressPrefix==`*` || sourceAddressPrefix==`0.0.0.0` || contains(sourceAddressPrefix,`/0`) || sourceAddressPrefix==`Internet`) && (destinationPortRange==`\"3389\"` || destinationPortRange==`*`) ]]"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_network_nsg_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_network_nsg_list | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_network_nsg_list | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_6_1
+  tags:
+    - level1
+    - section6
+    - rule_6.1
+
+- name: AUTOMATED | 6.2 | AUDIT | Ensure that SSH access is restricted from the internet
+  block:
+  - name: AUTOMATED | 6.2 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "6.2"
+        level: "1"
+        title: Ensure that SSH access is restricted from the internet
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[] | [?securityRules[?access== `Allow` && protocol==`Tcp` && direction==`Inbound` && (sourceAddressPrefix==`*` || sourceAddressPrefix==`0.0.0.0` || contains(sourceAddressPrefix,`/0`) || sourceAddressPrefix==`Internet`) && (destinationPortRange==`\"22\"` || destinationPortRange==`*`) ]]"
+  
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_network_nsg_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_network_nsg_list | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_network_nsg_list | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_6_2
+  tags:
+    - level1
+    - section6
+    - rule_6.2
+
+
+- name: AUTOMATED | 6.3 | AUDIT | Ensure no SQL Databases allow ingress 0.0.0.0/0 (ANY IP)
+  block:
+  - name: AUTOMATED | 6.3 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "6.3"
+        level: "1"
+        title: Ensure no SQL Databases allow ingress 0.0.0.0/0 (ANY IP)
+
+  - name: "AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get SQL Server List"
+    command: "az sql server list"
+    register: azure_sql_server_list_raw
+    changed_when: false
+
+  - name: "AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format SQL Server List"
+    set_fact:
+      azure_sql_server_list: "{{ azure_sql_server_list_raw.stdout | from_json }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get SQL Server Firewall Rule
+    shell: Get-AzSqlServerFirewallRule -ResourceGroupName {{ item.resourceGroup }} -ServerName {{ item.name }} -WarningAction 'SilentlyContinue' | ConvertTo-Json
+    loop: "{{ azure_sql_server_list }}"
+    args:
+      executable: /usr/bin/pwsh
+    register: az_sql_server_firewall_rule_raw
+    changed_when: false
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format SQL Server Firewall Rule
+    set_fact:
+      az_sql_server_firewall_rule: "{{ az_sql_server_firewall_rule_raw | json_query('results[?stdout != `\"\"`].stdout') | map('from_json') | list | default([],true) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[] | [?StartIpAddress == `0.0.0.0` || EndIpAddress == `0.0.0.0`]"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_sql_server_list  == []) | bool }}"
+        test: 
+          source: "{{ az_sql_server_firewall_rule | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ az_sql_server_firewall_rule | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ 'No SQL Servers Exist' if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_6_3
+  tags:
+    - level1
+    - section6
+    - rule_6.3
+
+
+- name: AUTOMATED | 6.4 | AUDIT | Ensure that Network Security Group Flow Log retention period is 'greater than 90 days'
+  block:
+  - name: AUTOMATED | 6.4 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "6.4"
+        level: "2"
+        title: Ensure that Network Security Group Flow Log retention period is 'greater than 90 days'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get Network Watcher Flow-Log
+    command: "az network watcher flow-log show --resource-group {{ item.resourceGroup }} --nsg {{ item.name }}"
+    loop: "{{ azure_network_nsg_list }}"
+    register: azure_network_watcher_flow_log_show_raw
+    changed_when: false
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Coalesce Network Watcher Flow-Log
+    set_fact:
+      azure_network_watcher_flow_log_show: '{{ azure_network_watcher_flow_log_show_raw | json_query("results[*].stdout") | map("from_json") | list | default([],true) }}'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[] | [?enabled == `false` && retentionPolicy.days < `90`]"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_network_nsg_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_network_watcher_flow_log_show | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_network_watcher_flow_log_show | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_6_4
+  tags:
+    - level2
+    - section6
+    - rule_6.4
+
+
+- name: AUTOMATED | 6.5 | AUDIT | Ensure that Network Watcher is 'Enabled'
+  block:
+  - name: AUTOMATED | 6.5 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "6.5"
+        level: "1"
+        title: Ensure that Network Watcher is 'Enabled'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get Azure Virtual Network List
+    command: az network vnet list  --subscription {{ azure_service_principal.subscription_id }}
+    register: azure_network_vnet_list_raw
+    changed_when: false
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format Azure Network Security Group List
+    set_fact:
+      azure_network_vnet_list: "{{ azure_network_vnet_list_raw.stdout | from_json | json_query(' [*].{name:name,resourceGroup:resourceGroup,location:location} ') | default([],true) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get Network Watcher List
+    command: "az network watcher list --subscription {{ azure_service_principal.subscription_id }}"
+    register: azure_network_watcher_list_raw
+    changed_when: false
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format Network Watcher List
+    set_fact:
+      locations_with_network_watcher: "{{ azure_network_watcher_list_raw.stdout | from_json | json_query('[].location')}}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Locations With Virtual Network
+    set_fact:
+      azure_locations_with_virtual_network: "{{ azure_network_vnet_list | json_query('[].location')}}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Locations With Virtual Vetwork But Without Network Watcher
+    set_fact:
+      locations_with_virtual_network_but_without_network_watcher: "{{ azure_locations_with_virtual_network | difference(locations_with_network_watcher) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[*]"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_network_vnet_list  == []) | bool }}"
+        test: 
+          source: "{{ locations_with_virtual_network_but_without_network_watcher | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: 
+            locations_with_virtual_network_but_without_network_watcher: "{{ locations_with_virtual_network_but_without_network_watcher | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ 'No Virtual Networks Exist' if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_6_5
+  tags:
+    - level1
+    - section6
+    - rule_6.5
+
+
+- name: AUTOMATED | 6.6 | AUDIT | Ensure that UDP Services are restricted from the Internet
+  block:
+  - name: AUTOMATED | 6.6 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "6.6"
+        level: "1"
+        title: Ensure that UDP Services are restricted from the Internet
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[] | [?securityRules[?access== `Allow` && protocol==`UDP` && direction==`Inbound`]]"
+  
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: "{{ azure_network_nsg_list | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_network_nsg_list | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_6_6
+  tags:
+    - level1
+    - section6
+    - rule_6.6

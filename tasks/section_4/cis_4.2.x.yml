@@ -1,0 +1,358 @@
+---
+#SQL Server - Advanced Data Security (ADS)
+- name: SETUP | SECTION 4 | Sql Server Vulnerability AssessmentSetting
+  block:
+  - name: "SETUP | SECTION4 | Get Sql Server Vulnerability Assessment Setting"
+    shell: Get-AzSqlServerVulnerabilityAssessmentSetting -ResourceGroupName {{ item.resourceGroup }} -ServerName {{ item.name }} -WarningAction 'SilentlyContinue' | ConvertTo-Json
+    loop: "{{ azure_sql_server_list }}"
+    args:
+      executable: /usr/bin/pwsh
+    register: az_sql_server_vulnerability_assessment_setting_raw
+    changed_when: false
+
+  - name: "SETUP | SECTION4 | Format Sql Server Vulnerability Assessment Setting"
+    set_fact:
+      az_sql_server_vulnerability_assessment_setting: "{{ az_sql_server_vulnerability_assessment_setting_raw | json_query('results[*].stdout') | map('from_json') | list | default([],true) }}"
+
+  when:
+    - azfcis_section4
+    - azfcis_rule_4_2_2 or
+      azfcis_rule_4_2_3 or
+      azfcis_rule_4_2_4 or
+      azfcis_rule_4_2_5
+  tags:
+    - section4
+    - rule_4.2.2
+    - rule_4.2.3
+    - rule_4.2.4
+    - rule_4.2.5
+
+
+- name: NEW | 4.2.1 | AUDIT | Ensure that Advanced Threat Protection (ATP) on a SQL server is set to 'Enabled'
+  block:
+  - name: NEW | 4.2.1 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "4.2.1"
+        level: "2"
+        title: Ensure that Advanced Threat Protection (ATP) on a SQL server is set to 'Enabled'
+
+  - name: "AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get Sql Server Advanced Threat Protection Setting"
+    shell: Get-AzSqlServerAdvancedThreatProtectionSetting -ResourceGroupName {{ item.resourceGroup }} -ServerName {{ item.name }} -WarningAction 'SilentlyContinue' | ConvertTo-Json -EnumsAsStrings
+    loop: "{{ azure_sql_server_list }}"
+    args:
+      executable: /usr/bin/pwsh
+    register: az_sql_server_advanced_threat_protection_setting_raw
+    changed_when: false
+
+  - name: "AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format Sql Server Advanced Threat Protection Setting"
+    set_fact:
+      az_sql_server_advanced_threat_protection_setting: "{{ az_sql_server_advanced_threat_protection_setting_raw | json_query('results[*].stdout') | map('from_json') | list | default([],true) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[?ThreatDetectionState!=`Enabled`]"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_sql_server_list  == []) | bool }}"
+        test: 
+          source: "{{ az_sql_server_advanced_threat_protection_setting | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ az_sql_server_advanced_threat_protection_setting | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  - name: "AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Enable-AzSqlServerAdvancedThreatProtection"
+    shell: Enable-AzSqlServerAdvancedThreatProtection -ResourceGroupName {{ item.ResourceGroupName }} -ServerName {{ item.ServerName }}
+    loop: "{{ az_sql_server_advanced_threat_protection_setting | json_query(evidence_query) }}"
+    args:
+      executable: /usr/bin/pwsh
+    changed_when: false
+
+  when:
+    - azfcis_rule_4_2_1
+  tags:
+    - level2
+    - section4
+    - rule_4.2.1
+
+
+- name: AUTOMATED | 4.2.2 | AUDIT | Ensure that Vulnerability Assessment (VA) is enabled on a SQL server by setting a Storage Account
+  block:
+  - name: AUTOMATED | 4.2.2 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "4.2.2"
+        level: "2"
+        title: Ensure that Vulnerability Assessment (VA) is enabled on a SQL server by setting a Storage Account
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: '[?StorageAccountName == `null` || StorageAccountName == `""`]'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_sql_server_list  == []) | bool }}"
+        test: 
+          source: "{{ az_sql_server_vulnerability_assessment_setting | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ az_sql_server_vulnerability_assessment_setting | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+
+  - name: "AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Update-AzSqlServerVulnerabilityAssessmentSetting"
+    shell: >
+      Update-AzSqlServerVulnerabilityAssessmentSetting
+      -EmailAdmins $true
+      -NotificationEmail {{ azfcis_sql_ads_va_email_list }}
+      -ResourceGroupName {{ item.ResourceGroupName }}
+      -RecurringScansInterval Weekly
+      -ScanResultsContainerName  "vulnerability-assessment"
+      -ServerName {{ item.ServerName }}
+      -StorageAccountName "{{ azfcis_sql_ads_va_storage_account }}"
+    loop: "{{ az_sql_server_vulnerability_assessment_setting }}"
+    args:
+      executable: /usr/bin/pwsh
+    changed_when: false
+
+  when:
+    - azfcis_rule_4_2_2
+  tags:
+    - level2
+    - section4
+    - rule_4.2.2
+
+
+- name: AUTOMATED | 4.2.3 | AUDIT | Ensure that ADS - VA setting Periodic Recurring Scans is enabled on a SQL server
+  block:
+  - name: AUTOMATED | 4.2.3 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "4.2.3"
+        level: "2"
+        title: Ensure that ADS - VA setting Periodic Recurring Scans is enabled on a SQL server
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[?RecurringScansInterval > `0`]"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_sql_server_list  == []) | bool }}"
+        test: 
+          source: "{{ az_sql_server_vulnerability_assessment_setting | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ az_sql_server_vulnerability_assessment_setting | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+
+  - name: "AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Update-AzSqlServerVulnerabilityAssessmentSetting"
+    shell: >
+      Update-AzSqlServerVulnerabilityAssessmentSetting
+      -EmailAdmins $true
+      -NotificationEmail {{ azfcis_sql_ads_va_email_list }}
+      -ResourceGroupName {{ item.ResourceGroupName }}
+      -RecurringScansInterval Weekly
+      -ScanResultsContainerName  "vulnerability-assessment"
+      -ServerName {{ item.ServerName }}
+      -StorageAccountName "{{ azfcis_sql_ads_va_storage_account }}"
+    loop: "{{ az_sql_server_vulnerability_assessment_setting }}"
+    args:
+      executable: /usr/bin/pwsh
+    changed_when: false
+
+  when:
+    - azfcis_rule_4_2_3
+  tags:
+    - level2
+    - section4
+    - rule_4.2.3
+
+
+- name: AUTOMATED | 4.2.4 | AUDIT | Ensure that ADS - VA setting Send scan reports to is configured for a SQL server
+  block:
+  - name: AUTOMATED | 4.2.4 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "4.2.4"
+        level: "2"
+        title: Ensure that ADS - VA setting Send scan reports to is configured for a SQL server
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[?NotificationEmail==`[]` || NotificationEmail==`null`]"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_sql_server_list  == []) | bool }}"
+        test: 
+          source: "{{ az_sql_server_vulnerability_assessment_setting | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ az_sql_server_vulnerability_assessment_setting | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+
+  - name: "AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Update-AzSqlServerVulnerabilityAssessmentSetting"
+    shell: >
+      Update-AzSqlServerVulnerabilityAssessmentSetting
+      -EmailAdmins $true
+      -NotificationEmail {{ azfcis_sql_ads_va_email_list }}
+      -ResourceGroupName {{ item.ResourceGroupName }}
+      -RecurringScansInterval Weekly
+      -ScanResultsContainerName  "vulnerability-assessment"
+      -ServerName {{ item.ServerName }}
+      -StorageAccountName "{{ azfcis_sql_ads_va_storage_account }}"
+    loop: "{{ az_sql_server_vulnerability_assessment_setting }}"
+    args:
+      executable: /usr/bin/pwsh
+    changed_when: false
+
+  when:
+    - azfcis_rule_4_2_4
+  tags:
+    - level2
+    - section4
+    - rule_4.2.4
+
+
+- name: AUTOMATED | 4.2.5 | AUDIT | Ensure that ADS - VA setting 'Also send email notifications to admins and subscription owners' is set for a SQL server
+  block:
+  - name: AUTOMATED | 4.2.5 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "4.2.8"
+        level: "2"
+        title: Ensure that ADS - VA setting 'Also send email notifications to admins and subscription owners' is set for a SQL server
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[?EmailAdmins==`false`]"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_sql_server_list  == []) | bool }}"
+        test: 
+          source: "{{ az_sql_server_vulnerability_assessment_setting | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ az_sql_server_vulnerability_assessment_setting | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+
+  - name: "AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Update-AzSqlServerVulnerabilityAssessmentSetting"
+    shell: >
+      Update-AzSqlServerVulnerabilityAssessmentSetting
+      -EmailAdmins $true
+      -NotificationEmail {{ azfcis_sql_ads_va_email_list }}
+      -ResourceGroupName {{ item.ResourceGroupName }}
+      -RecurringScansInterval Weekly
+      -ScanResultsContainerName  "vulnerability-assessment"
+      -ServerName {{ item.ServerName }}
+      -StorageAccountName "{{ azfcis_sql_ads_va_storage_account }}"
+    loop: "{{ az_sql_server_vulnerability_assessment_setting }}"
+    args:
+      executable: /usr/bin/pwsh
+    changed_when: false
+
+  when:
+    - azfcis_rule_4_2_5
+  tags:
+    - level2
+    - section4
+    - rule_4.2.5

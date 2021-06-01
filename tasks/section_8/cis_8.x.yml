@@ -1,0 +1,365 @@
+---
+# 8 Other Security Considerations
+- name: SETUP | SECTION 8 | Key vault list
+  block:
+  - name: SETUP | SECTION 8 | Get Key vault list
+    command: "az keyvault list --subscription {{ azure_service_principal.subscription_id }}"
+    register: azure_keyvault_list_raw
+    changed_when: false
+
+  - name: SETUP | SECTION 8 | Format Key vault list
+    set_fact:
+      azure_keyvault_list: "{{ azure_keyvault_list_raw.stdout | from_json | default([],true) }}"
+
+  - name: SETUP | SECTION 8 | Set Exception Message
+    set_fact:
+      exception_evidence_message: "No Key Vaults Exist"
+
+  when:
+    - azfcis_section8
+    - azfcis_rule_8_1 or
+      azfcis_rule_8_2 or
+      azfcis_rule_8_3 or
+      azfcis_rule_8_4
+    
+  tags:
+    - level1
+    - section8
+    - rule_8.1
+    - rule_8.2
+    - rule_8.3
+    - rule_8.4
+
+
+- name: AUTOMATED | 8.1 | AUDIT | Ensure that the expiration date is set on all keys
+  block:
+  - name: AUTOMATED | 8.1 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "8.1"
+        level: "1"
+        title: Ensure that the expiration date is set on all keys
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get KeyVault Key List
+    command: "az keyvault key list --vault-name {{ item.name }} --subscription {{ azure_service_principal.subscription_id }}"
+    loop: "{{ azure_keyvault_list }}"
+    register: azure_keyvault_key_list_raw
+    changed_when: false
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format KeyVault Key List
+    set_fact:
+      azure_keyvault_key_list: "{{ azure_keyvault_key_list_raw | json_query('results[?stdout != `\"[]\"`].stdout') | map('from_json') | list | default([],true)}}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[] | [?attributes.enabled && kid != `null` && attributes.expires == `null`]"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_keyvault_key_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_keyvault_key_list | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_keyvault_key_list | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ 'No Key Vault Keys exist' if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set KeyVault Key Expiration
+    command: "az keyvault key set-attributes --id {{ item.kid }} --subscription {{ azure_service_principal.subscription_id }} --expires {{ azfcis_keyvault_expiration_date }}"
+    loop: "{{ azure_keyvault_key_list | json_query('[]') }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_8_1
+  tags:
+    - level1
+    - section8
+    - rule_8.1
+
+
+- name: AUTOMATED | 8.2 | AUDIT | Ensure that the expiration date is set on all Secrets
+  block:
+  - name: AUTOMATED | 8.2 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "8.2"
+        level: "1"
+        title: Ensure that the expiration date is set on all Secrets
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get KeyVault Key List
+    command: "az keyvault secret list --vault-name {{ item.name }} --subscription {{ azure_service_principal.subscription_id }}"
+    loop: "{{ azure_keyvault_list }}"
+    register: azure_keyvault_secret_list_raw
+    changed_when: false
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format KeyVault Key List
+    set_fact:
+      azure_keyvault_secret_list: "{{ azure_keyvault_secret_list_raw | json_query('results[?stdout != `\"[]\"`].stdout') | map('from_json') | list | default([],true) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[] | [?attributes.enabled && id != `null` && attributes.expires == `null`]"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_keyvault_secret_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_keyvault_secret_list | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_keyvault_secret_list | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ 'No Key Vault Secrets Exist' if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set KeyVault Secret Expiration
+    command: "az keyvault secret set-attributes --id {{ item.id }} --subscription {{ azure_service_principal.subscription_id }} --expires {{ azfcis_keyvault_expiration_date }}"
+    loop: "{{ azure_keyvault_secret_list | json_query('[]') }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_8_2
+  tags:
+    - level1
+    - section8
+    - rule_8.2
+
+
+- name: AUTOMATED | 8.3 | AUDIT | Ensure that the expiration date is set on all Secrets
+  block:
+  - name: AUTOMATED | 8.3 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "8.3"
+        level: "2"
+        title: Ensure that Resource Locks are set for mission critical Azure resources
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get KeyVault Key List
+    command: "az lock list --subscription {{ azure_service_principal.subscription_id }}"
+    register: azure_lock_list_raw
+    changed_when: false
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format KeyVault Key List
+    set_fact:
+      azure_lock_list: "{{ azure_lock_list_raw.stdout | from_json | default([],true) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[*]"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_keyvault_list  == []) | bool }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: "{{ azure_lock_list | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_8_3
+    - do_manual
+  tags:
+    - level2
+    - section8
+    - rule_8.3
+
+
+- name: AUTOMATED | 8.4 | AUDIT | Ensure that the expiration date is set on all Secrets
+  block:
+  - name: AUTOMATED | 8.4 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "8.4"
+        level: "1"
+        title: Ensure the key vault is recoverable
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get Resource List of KeyVaults
+    command: az resource list --subscription {{ azure_service_principal.subscription_id }} --query "[?type=='Microsoft.KeyVault/vaults']"
+    register: azure_resource_list_keyvault_raw
+    changed_when: false
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format Resource List of KeyVaults
+    set_fact:
+      azure_resource_list_keyvault: "{{ azure_resource_list_keyvault_raw.stdout | from_json | default([],true) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Show KeyVault Resources
+    command: "az resource show --id  {{ item.id }} --subscription {{ azure_service_principal.subscription_id }}"
+    loop: "{{ azure_resource_list_keyvault }}"
+    register: azure_resource_show_keyvault_raw
+    changed_when: false
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format KeyVault Resources
+    set_fact:
+      azure_resource_show_keyvault: '{{ azure_resource_show_keyvault_raw | json_query("results[*].stdout") | map("from_json") | list | default([],true) }}'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[] | [?properties.enablePurgeProtection != `true` || properties.enableSoftDelete != `true`].{name:name,enablePurgeProtection:properties.enablePurgeProtection,enableSoftDelete:properties.enableSoftDelete}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_keyvault_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_resource_show_keyvault | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_resource_show_keyvault | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set KeyVault Recoverable
+    command: "az resource update --id {{ item.id }} --set properties.enablePurgeProtection=true properties.enableSoftDelete=true --subscription {{ azure_service_principal.subscription_id }}"
+    loop: "{{ azure_resource_list_keyvault }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_8_4
+  tags:
+    - level1
+    - section8
+    - rule_8.4
+
+
+
+- name: AUTOMATED | 8.5 | AUDIT | Enable role-based access control (RBAC) within Azure Kubernetes Services
+  block:
+  - name: AUTOMATED | 8.5 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "8.5"
+        level: "1"
+        title: Enable role-based access control (RBAC) within Azure Kubernetes Services
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get Azure Kubernetes Service List
+    command: az aks list --subscription {{ azure_service_principal.subscription_id }}
+    register: azure_aks_list_raw
+    changed_when: false
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format Resource List of KeyVaults
+    set_fact:
+      azure_aks_list: "{{ azure_aks_list_raw.stdout | from_json | default([],true) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[] | [?enableRbac != `true`]"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_aks_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_aks_list | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_aks_list | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ 'No AKS Clusters Exist' if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_8_5
+  tags:
+    - level1
+    - section8
+    - rule_8.5

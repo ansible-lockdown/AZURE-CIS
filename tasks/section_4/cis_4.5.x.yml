@@ -1,0 +1,82 @@
+---
+- name: AUTOMATED | 4.5 | AUDIT | Ensure SQL server's TDE protector is encrypted with Customer managed key
+  block:
+  - name: AUTOMATED | 4.5 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "4.5"
+        level: "2"
+        title: Ensure SQL server's TDE protector is encrypted with Customer managed key
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Request Azure Access Token
+    command: az account get-access-token
+    register: request_azure_access_token_output
+    changed_when: false
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Extract Azure Authorization Header and Subscription Id
+    set_fact:
+      azure_auth_header: Bearer {{ (request_azure_access_token_output.stdout | from_json).accessToken }}
+      azure_auth_token: "{{ (request_azure_access_token_output.stdout | from_json).accessToken }}"
+      azure_subscription_id: "{{ (request_azure_access_token_output.stdout | from_json).subscription }}"
+
+  - name: "AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get SQL Server Encryption Protector"
+    uri:
+      method: GET
+      url: "{{ 'https://management.azure.com/subscriptions/' + azure_subscription_id + '/resourceGroups/' + item.resourceGroup + '/providers/Microsoft.Sql/servers/' + item.name + '/encryptionProtector?api-version=2015-05-01-preview' }}"
+      headers:
+        Authorization: "{{ azure_auth_header }}"
+      return_content: no
+    loop: "{{ azure_sql_server_list }}"
+    register: azure_sql_server_tde_protector_list_raw
+
+  - name: "AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format SQL Server Encryption Protector"
+    set_fact:
+      azure_sql_server_tde_protector_list: '{{ azure_sql_server_tde_protector_list_raw | json_query("results[*].json.value") | list | default([],true) }}'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[] | [?kind!=`azurekeyvault` && properties.serverKeyType!=`AzureKeyVault`]"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_sql_server_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_sql_server_tde_protector_list | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_sql_server_tde_protector_list | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set SQL Server TDE Key
+    command: "az sql server tde-key set --resource-group {{ item.resourceGroup }} --server {{ item.name }} --server-key-type AzureKeyVault --kid {{ azfcis_sql_server_tde_key_id }}"
+    loop: "{{  azure_sql_server_list }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_4_5
+  tags:
+    - level2
+    - section4
+    - rule_4.5

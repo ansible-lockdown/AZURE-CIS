@@ -1,0 +1,186 @@
+---
+# 4.1 SQL Server - Auditing
+- name: AUTOMATED | 4.1.1 | AUDIT | Ensure that 'Auditing' is set to 'On'
+  block:
+  - name: AUTOMATED | 4.1.1 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "4.1.1"
+        level: "1"
+        title: Ensure that 'Auditing' is set to 'On'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[?state == `Disabled`]"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_sql_server_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_sql_server_list | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_sql_server_list | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+
+  - name: "AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set 'Auditing' to 'On'"
+    shell: Set-AzSqlServerAudit -ResourceGroupName {{ item.resourceGroup }} -ServerName {{ item.name }} -BlobStorageTargetState Enabled -StorageAccountResourceId {{ azfcis_storage_account_resource_id }}
+    loop: "{{ azure_sql_server_list }}"
+    args:
+      executable: /usr/bin/pwsh
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_4_1_1
+  tags:
+    - level1
+    - section4
+    - rule_4.1.1
+
+- name: AUTOMATED | 4.1.2 | AUDIT | Ensure that 'Data encryption' is set to 'On' on a SQL Database
+  block:
+  - name: AUTOMATED | 4.1.2 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "4.1.2"
+        level: "1"
+        title: Ensure that 'Data encryption' is set to 'On' on a SQL Database
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get SQL Database TDE Show
+    command: "az sql db tde show --ids '{{ item }}'"
+    loop: "{{ azure_sql_db_list }}"
+    register: azure_sql_db_tde_show_raw
+    changed_when: false
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format SQL Database TDE Show
+    set_fact:
+      azure_sql_db_tde_show: "{{ azure_sql_db_tde_show_raw | json_query('results[*].stdout') | map('from_json') | list | default([],true) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[?status== `Disabled`]"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_sql_server_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_sql_db_tde_show | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_sql_db_tde_show | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set 'Data encryption' to 'Enabled'
+    command: "az sql db tde set --ids '{{ item }}' --status Enabled"
+    loop: "{{ azure_sql_db_list }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_4_1_2
+  tags:
+    - level1
+    - section4
+    - rule_4.1.2
+
+- name: AUTOMATED | 4.1.3 | AUDIT | Ensure that 'Auditing' Retention is 'greater than 90 days'
+  block:
+  - name: AUTOMATED | 4.1.3 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "4.1.3"
+        level: "1"
+        title: Ensure that 'Auditing' Retention is 'greater than 90 days'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[?retentionDays < `90`]"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_sql_server_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_sql_server_audit_policy_show | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_sql_server_audit_policy_show | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+
+  - name: "AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set SQL 'Auditing' Retention to {{ azfcis_sql_server_auditing_retentionindays }}"
+    shell: Set-AzSqlServerAudit -ResourceGroupName {{ item.resourceGroup }} -ServerName {{ item.name }} -RetentionInDays {{ azfcis_sql_server_auditing_retentionindays }}
+    loop: "{{ azure_sql_server_list }}"
+    args:
+      executable: /usr/bin/pwsh
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_4_1_3
+  tags:
+    - level1
+    - section4
+    - rule_4.1.3

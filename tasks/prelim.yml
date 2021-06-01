@@ -1,0 +1,35 @@
+---
+- name: PRELIM | Login to Azure
+  block: 
+  - name: PRELIM | Login to Azure
+    command: >
+      az login 
+      --username '{{ azure_service_principal.client_id }}'
+      --password '{{ azure_service_principal.client_key }}'
+      --tenant   '{{ azure_service_principal.tenant_id }}'
+      --service-principal
+      --allow-no-subscriptions
+    changed_when: false
+    register: azure_login_raw
+
+- name: PRELIM | Import-Module
+  shell: |
+    $ModuleNames = @('Az.Accounts','Az.Sql')
+    Import-Module -Name $ModuleNames
+  args:
+    executable: /usr/bin/pwsh
+  changed_when: false
+
+- name: PRELIM | Connect-AzAccount
+  shell: |
+    Import-Module -Name Az.Accounts
+    [String]$UserName     = '{{ azure_service_principal.client_id }}'
+    [String]$Password     = '{{ azure_service_principal.client_key }}'
+    [String]$Tenant       = '{{ azure_service_principal.tenant_id }}'
+    [String]$Subscription = '{{ azure_service_principal.subscription_id }}'
+    [SecureString]$SecureString = (ConvertTo-SecureString -String $Password -AsPlainText -Force)
+    [PSCredential]$Credential = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList ($UserName, $SecureString)
+    Connect-AzAccount -Credential $Credential -Tenant $Tenant -Subscription $Subscription -ServicePrincipal
+  args:
+    executable: /usr/bin/pwsh
+  changed_when: false

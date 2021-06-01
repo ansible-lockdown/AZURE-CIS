@@ -1,0 +1,663 @@
+---
+# Storage Accounts
+- name: "SETUP | SECTION 3 | Get Storage Account List"
+  block:
+  - name: "SETUP | SECTION 3 | Get Storage Account List"
+    command: "az storage account list"
+    register: azure_storage_account_list_raw
+    changed_when: false
+
+  - name: "SETUP | SECTION 3 | Format Storage Account List"
+    set_fact:
+      azure_storage_account_list: "{{ azure_storage_account_list_raw.stdout | from_json | default([],true) }}"
+
+  - name: "SETUP | SECTION 3 | Set Evidence Message"
+    set_fact:
+      exception_evidence_message: "No Storage Accounts Exist"
+
+  when:
+    - azfcis_section3
+    - azfcis_rule_3_1 or
+      azfcis_rule_3_2 or
+      azfcis_rule_3_3 or
+      azfcis_rule_3_5 or
+      azfcis_rule_3_6 or
+      azfcis_rule_3_7 or
+      azfcis_rule_3_8 or
+      azfcis_rule_3_9 or
+      azfcis_rule_3_10 or
+      azfcis_rule_3_11
+  tags:
+    - section3
+    - rule_3.1
+    - rule_3.2
+    - rule_3.3
+    - rule_3.5
+    - rule_3.6
+    - rule_3.7
+    - rule_3.8
+    - rule_3.9
+    - rule_3.10
+    - rule_3.11
+
+- name: AUTOMATED | 3.1 | AUDIT | Ensure that 'Secure transfer required' is set to 'Enabled'
+  block:
+  - name: AUTOMATED | 3.1 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "3.1"
+        level: "1"
+        title: Ensure that 'Secure transfer required' is set to 'Enabled'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[?enableHttpsTrafficOnly != `true`].{name:name,enableHttpsTrafficOnly:enableHttpsTrafficOnly}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_failure: "{{ (azure_storage_account_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_storage_account_list | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_storage_account_list | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'failure' if this_rule.is_failure else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_failure else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set 'Secure transfer required' to Enabled
+    shell: "az storage account update --name {{ item.name }} --resource-group {{ item.resourceGroup }} --https-only true"
+    loop: "{{ azure_storage_account_list }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_3_1
+  tags:
+    - level1
+    - section3
+    - rule_3.1
+
+
+- name: MANUAL | 3.2 | AUDIT | Ensure that storage account access keys are periodically regenerated
+  block:
+  - name: MANUAL | 3.2 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "3.2"
+        level: "1"
+        title: Ensure that storage account access keys are periodically regenerated
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_failure: "{{ (azure_storage_account_list  == []) | bool }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: "{{ azure_storage_account_list | json_query(evidence_query) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'failure' if this_rule.is_failure else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_failure else (this_rule.test.evidence | default(None)) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_3_2
+    - do_manual
+  tags:
+    - level1
+    - audit
+    - rule_3.2
+
+
+- name: AUTOMATED | 3.3 | AUDIT | Ensure Storage logging is enabled for Queue service for read, write, and delete requests
+  block:
+  - name: AUTOMATED | 3.3 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "3.3"
+        level: "1"
+        title: Ensure Storage logging is enabled for Queue service for read, write, and delete requests
+
+  - name: "AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get Storage Logging Show"
+    shell: "az storage logging show --services q --account-name {{ item }} | jq '.name=\"{{ item }}\"'"
+    loop: "{{ azure_storage_account_list | json_query('[*].name') }}"
+    register: azure_storage_account_logging_show_queue_raw
+    changed_when: false
+
+  - name: "AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format Storage Logging Show"
+    set_fact:
+      azure_storage_account_logging_show_queue: '{{ azure_storage_account_logging_show_queue_raw | json_query("results[*].stdout") | map("from_json") | list | default([],true) }}'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[?queue.delete != `true` || queue.read != `true` || queue.write != `true`].{name:name,delete:queue.delete,read:queue.read,write:queue.write}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_storage_account_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_storage_account_logging_show_queue | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_storage_account_logging_show_queue | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+
+  #   HIGH COMPLEXITY. Need to fetch a storage account key for each storage account to update
+  # - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Delete AllowAllWindowsAzureIps firewall rule
+  #   command: "az storage logging update --account-name {{ item.name }} --account-key {{ item.key }} --services q --log rwd --retention 90"
+  #   loop: "{{ azure_storage_account_logging_show_queue }}"
+  #   changed_when: true
+  #   when:
+  #     - disruption_high
+  #     - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_3_3
+  tags:
+    - level1
+    - section3
+    - rule_3.3
+
+- name: MANUAL | 3.4 | AUDIT | Ensure that shared access signature tokens expire within an hour
+  block:
+  - name: AUTOMATED | 3.4 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "3.4"
+        level: "2"
+        title: Ensure that shared access signature tokens expire within an hour
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_failure: "{{ (azure_storage_account_list  == []) | bool }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: "{{ azure_storage_account_list | json_query(evidence_query) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'failure' if this_rule.is_failure else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_failure else (this_rule.test.evidence | default(None)) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_3_4
+    - do_manual
+  tags:
+    - level2
+    - audit
+    - rule_3.4
+
+- name: AUTOMATED | 3.5 | AUDIT | Ensure that 'Public access level' is set to Private for blob containers
+  block:
+  - name: AUTOMATED | 3.5 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "3.5"
+        level: "1"
+        title: Ensure that 'Public access level' is set to Private for blob containers
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get Storage Container List
+    shell: "az storage container list --account-name {{ item }}"
+    loop: "{{ azure_storage_account_list | json_query('[*].name') }}"
+    register: azure_storage_container_list_raw
+    changed_when: false
+
+  - name: "AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format Storage Container List"
+    set_fact:
+      azure_storage_container_list: "{{ azure_storage_container_list_raw | json_query('results[*].stdout') | map('from_json') | list | default([],true) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[] | [?properties.publicAccess != `null`].{containerName:name,publicAccess:properties.publicAccess}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_storage_container_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_storage_container_list | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_storage_container_list | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ 'No Storage Containers Exist' if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set 'Public access level' to Private for blob containers
+    command: "az storage container set-permission --name {{ item.containerName }} --public-access off"
+    loop: "{{  azure_storage_container_list | json_query(evidence_query) }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_3_5
+  tags:
+    - level1
+    - section3
+    - rule_3.5
+
+- name: AUTOMATED | 3.6 | AUDIT | Ensure default network access rule for Storage Accounts is set to deny
+  block:
+  - name: AUTOMATED | 3.6 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "3.6"
+        level: "2"
+        title: Ensure default network access rule for Storage Accounts is set to deny
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[?networkRuleSet.defaultAction=='Allow'].{name:name,id:id,defaultAction:networkRuleSet.defaultAction}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_storage_account_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_storage_account_list | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_storage_account_list | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set default network access rule for Storage Accounts to deny
+    command: "az storage account update --ids {{ item.id }} --default-action Deny"
+    loop: "{{  azure_storage_account_list | json_query(evidence_query) }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_3_6
+  tags:
+    - level2
+    - section3
+    - rule_3.6
+
+- name: AUTOMATED | 3.7 | AUDIT | Ensure 'Trusted Microsoft Services' is enabled for Storage Account access
+  block:
+  - name: AUTOMATED | 3.7 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "3.7"
+        level: "2"
+        title: Ensure 'Trusted Microsoft Services' is enabled for Storage Account access
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[?networkRuleSet.bypass != 'AzureServices'].{name:name,id:id,defaultAction:networkRuleSet.bypass}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_storage_account_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_storage_account_list | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_storage_account_list | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set 'Trusted Microsoft Services' to enabled
+    command: "az storage account update --ids {{ item.id }} --bypass AzureServices"
+    loop: "{{  azure_storage_account_list | json_query(evidence_query) }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_3_7
+  tags:
+    - level2
+    - section3
+    - rule_3.7
+
+- name: AUTOMATED | 3.8 | AUDIT | Ensure soft delete is enabled for Azure Storage
+  block:
+  - name: AUTOMATED | 3.8 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "3.8"
+        level: "1"
+        title: Ensure soft delete is enabled for Azure Storage
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get Storage Blob Service Properties
+    shell: "az storage blob service-properties delete-policy show --account-name {{ item }} | jq '.name=\"{{ item }}\"'"
+    loop: "{{ azure_storage_account_list | json_query('[*].name') }}"
+    register: azure_storage_blob_delete_policy_show_raw
+    changed_when: false
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format Storage Blob Service Properties
+    set_fact:
+      azure_storage_blob_delete_policy_show: '{{ azure_storage_blob_delete_policy_show_raw | json_query("results[*].stdout") | map("from_json") | list | default([],true) }}'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: '[?enabled != `true` || days == `null` || days == `""`]'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_storage_account_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_storage_blob_delete_policy_show | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_storage_blob_delete_policy_show | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set soft delete to Enabled for Azure Storage
+    shell: "az storage blob service-properties delete-policy update --days-retained {{ azfcis_days_retained }} --account-name {{ item.name }} --enable true"
+    loop: "{{ azure_storage_account_list }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_3_8
+  tags:
+    - level1
+    - section3
+    - rule_3.8
+
+- name: MANUAL | 3.9 | AUDIT | Ensure storage for critical data are encrypted with Customer Managed Key
+  block:
+  - name: AUTOMATED | 3.9 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "3.9"
+        level: "2"
+        title: Ensure storage for critical data are encrypted with Customer Managed Key
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_storage_account_list  == []) | bool }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: See benchmark rule {{ this_rule.id }} documentation for manual audit and remediation procedures
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_3_9
+    - do_manual
+  tags:
+    - level2
+    - audit
+    - rule_3.9
+
+- name: AUTOMATED | 3.10 | AUDIT | Ensure Storage logging is enabled for Blob service for read, write, and delete requests
+  block:
+  - name: AUTOMATED | 3.10 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "3.10"
+        level: "2"
+        title: Ensure Storage logging is enabled for Blob service for read, write, and delete requests
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get Storage Logging Show Blob
+    shell: "az storage logging show --services b --account-name {{ item }} | jq '.name=\"{{ item }}\"'"
+    loop: "{{ azure_storage_account_list | json_query('[*].name') }}"
+    register: azure_storage_logging_show_blob_raw
+    changed_when: false
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format Storage Logging Show Blob
+    set_fact:
+      azure_storage_logging_show_blob: '{{ azure_storage_logging_show_blob_raw | json_query("results[*].stdout") | map("from_json") | list | default([],true) }}'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: '[?blob.delete != `true` || blob.read != `true` || blob.write != `true`].{name:name,delete:blob.delete,read:blob.read,write:blob.write}'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_storage_account_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_storage_logging_show_blob | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_storage_logging_show_blob | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+
+  when:
+    - azfcis_rule_3_10
+  tags:
+    - level2
+    - section3
+    - rule_3.10
+
+- name: AUTOMATED | 3.11 | AUDIT | Ensure Storage logging is enabled for Blob service for read, write, and delete requests
+  block:
+  - name: AUTOMATED | 3.11 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "3.11"
+        level: "2"
+        title: Ensure Storage logging is enabled for Blob service for read, write, and delete requests
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get Storage Logging Show Table
+    shell: "az storage logging show --services t --account-name {{ item }} | jq '.name=\"{{ item }}\"'"
+    loop: "{{ azure_storage_account_list | json_query('[*].name') }}"
+    register: azure_storage_logging_show_table_raw
+    changed_when: false
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format Storage Logging Show Table
+    set_fact:
+      azure_storage_logging_show_table: '{{ azure_storage_logging_show_table_raw | json_query("results[*].stdout") | map("from_json") | list | default([],true) }}'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: '[?table.delete != `true` || table.read != `true` || table.write != `true`].{name:name,delete:table.delete,read:table.read,write:table.write}'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_storage_account_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_storage_logging_show_table | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_storage_logging_show_table | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+
+  when:
+    - azfcis_rule_3_11
+  tags:
+    - level2
+    - section3
+    - rule_3.11

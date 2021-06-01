@@ -1,0 +1,344 @@
+---
+#### 5.1 Configuring Diagnostic Settings
+- name: SETUP | SECTION 5 | Key Vault List
+  block:
+  - name: SETUP | SECTION 5 | Get Key Vault List
+    command: "az keyvault list --subscription {{ azure_service_principal.subscription_id }}"
+    register: azure_keyvault_list_raw
+    changed_when: false
+
+  - name: SETUP | SECTION5 | Format Key Vault List
+    set_fact:
+      azure_keyvault_list: "{{ azure_keyvault_list_raw.stdout | from_json | default([],true)}}"
+
+  when:
+    - azfcis_section5
+  tags:
+    - section5
+    - rule_5.1.5
+
+
+- name: SETUP | SECTION 5 | Monitor Log Profiles
+  block:
+  - name: "SETUP | SECTION5 | Get Monitor Log Profiles"
+    command: "az monitor log-profiles list --subscription {{ azure_service_principal.subscription_id }}"
+    register: azure_monitor_log_profiles_list_raw
+    changed_when: false
+
+  - name: "SECTION5 | Format Monitor Log Profiles"
+    set_fact:
+      azure_monitor_log_profiles_list: "{{ azure_monitor_log_profiles_list_raw.stdout | from_json | default([],true) }}"
+
+  when:
+    - azfcis_section5
+    - azfcis_rule_5_1_2 or
+      azfcis_rule_5_1_3 or
+      azfcis_rule_5_1_4
+  tags:
+    - section5
+    - rule_5.1.2
+    - rule_5.1.3
+    - rule_5.1.4
+
+
+- name: MANUAL | 5.1.1 | AUDIT | Ensure that a 'Diagnostics Setting' exists
+  block:
+  - name: MANUAL | 5.1.1 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "5.1.1"
+        level: "1"
+        title: Ensure that a 'Diagnostics Setting' exists
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: See benchmark rule {{ this_rule.id }} documentation for manual audit and remediation procedures
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_5_1_1
+    - do_manual
+  tags:
+    - level1
+    - section5
+    - rule_5.1.1
+
+######## Use CLI to setup log-profiles ########
+# 5.1.2
+# 5.1.3
+# 5.1 4
+# az monitor log-profiles create --categories "Write" "Delete" "Action" --days 1 --enabled true --location centralus --locations centralus --name WriteDeleteAction --storage-account-id "SomeAccountID"
+###############################################
+
+
+- name: AUTOMATED | 5.1.2 | AUDIT | Ensure Diagnostic Setting captures appropriate categories
+  block:
+  - name: AUTOMATED | 5.1.2 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "5.1.2"
+        level: "1"
+        title: Ensure Diagnostic Setting captures appropriate categories
+
+  - name: SETUP | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get Azure Monitor Diagnostic Settings Subscription List
+    command: "az monitor diagnostic-settings subscription list --subscription {{ azure_service_principal.subscription_id }}"
+    register: azure_monitor_diagnostic_settings_subscription_list_raw
+    changed_when: false
+
+  - name: SETUP | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format Azure Monitor Diagnostic Settings Subscription List
+    set_fact:
+      azure_monitor_diagnostic_settings_subscription_list: "{{ azure_monitor_diagnostic_settings_subscription_list_raw.stdout | from_json | json_query('value') | default([],true) }}"
+
+  - name: DEBUG | azure_monitor_diagnostic_settings_subscription_list
+    debug:
+      msg: "{{ azure_monitor_diagnostic_settings_subscription_list }}"
+
+  - name: AUTOMATION | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[*]"
+
+  - name: AUTOMATION | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_failure: "{{ (azure_monitor_diagnostic_settings_subscription_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_monitor_diagnostic_settings_subscription_list | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_monitor_diagnostic_settings_subscription_list | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'fail' if this_rule.is_failure else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ 'No Log Profiles Exist' if this_rule.is_failure else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_5_1_2
+  tags:
+    - level1
+    - section5
+    - rule_5.1.2
+
+
+- name: AUTOMATED | 5.1.3 | AUDIT | Ensure the storage container storing the activity logs is not publicly accessible
+  block:
+  - name: AUTOMATED | 5.1.3 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "5.1.3"
+        level: "1"
+        title: Ensure the storage container storing the activity logs is not publicly accessible
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get Azure Storage Container List
+    shell: az storage container list --account-name {{ item.storageAccountId.split('/storageAccounts/')[1] }} --subscription {{ azure_service_principal.subscription_id }} #| jq '.storageAccountName="{{ item.storageAccountId.split('/storageAccounts/')[1] }}"'
+    loop: "{{ azure_monitor_log_profiles_list }}"
+    register: azure_storage_container_list_raw
+    changed_when: false
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format Azure Storage Container List
+    set_fact:
+      azure_storage_container_list: '{{ azure_storage_container_list_raw | json_query("results[*].stdout") | map("from_json") | list | default([],true) }}'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format Azure Storage Container List
+    set_fact:
+      insights_operational_logs_storage_container_list: "{{ azure_storage_container_list | json_query('[?name == `insights-operational-logs` && publicAccess != `null`]') }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_failure: "{{ (insights_operational_logs_storage_container_list  == []) | bool }}"
+        test: 
+          source: "{{ insights_operational_logs_storage_container_list |  json_query('[*]') | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ insights_operational_logs_storage_container_list |  json_query('[*]') }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'fail' if this_rule.is_failure else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ 'No Log Profiles Exist' if this_rule.is_failure else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  # HIGH COMPLEXITY | Need to understand how to determine the storage account
+  # The object insights_operational_logs_storage_container_list contains the storage container, but not the storage account. Need to find a way to get the storage account, or use id
+  - name: SETUP | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Delete AllowAllWindowsAzureIps firewall rule
+    command: "az storage container set-permission --name insights-operational-logs --account-name {{ azfcis_activity_logs_storage_container }} --public-access off"
+    loop: "{{ insights_operational_logs_storage_container_list }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+      - is_buggy
+
+  when:
+    - azfcis_rule_5_1_3
+  tags:
+    - level1
+    - section5
+    - rule_5.1.3
+
+
+- name: AUTOMATED | 5.1.4 | AUDIT | Ensure the storage account containing the container with activity logs is encrypted with BYOK (Use Your Own Key)
+  block:
+  - name: AUTOMATED | 5.1.4 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "5.1.4"
+        level: "2"
+        title: Ensure the storage account containing the container with activity logs is encrypted with BYOK (Use Your Own Key)
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get Azure Storage Account List
+    command: az storage account list --query "[?name=='{{ item.storageAccountId.split('/storageAccounts/')[1] }}']" --subscription {{ azure_service_principal.subscription_id }}
+    loop: "{{ azure_monitor_log_profiles_list }}"
+    register: azure_storage_account_list_raw
+    changed_when: false
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format Azure Storage Account List
+    set_fact:
+      azure_storage_account_list: '{{ azure_storage_account_list_raw | json_query("results[*].stdout") | map("from_json") | list | default([],true) }}'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: '[] | [?encryption.keySource != `Microsoft.Keyvault` || encryption.keyVaultProperties != `null`].{name:name,keySource:encryption.keySource,keyVaultProperties:encryption.keyVaultProperties}'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_failure: "{{ (azure_monitor_log_profiles_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_storage_account_list | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_storage_account_list | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'fail' if this_rule.is_failure else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ 'No Log Profiles Exist' if this_rule.is_failure else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_5_1_4
+  tags:
+    - level2
+    - section5
+    - rule_5.1.4
+
+
+- name: AUTOMATED | 5.1.5 | AUDIT | Ensure that a 'Diagnostics Setting' exists
+  block:
+  - name: AUTOMATED | 5.1.5 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "5.1.5"
+        level: "1"
+        title: Ensure that a 'Diagnostics Setting' exists
+
+  - name: SETUP | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get Azure Monitor Diagnostic Settings List
+    command: "az monitor diagnostic-settings list --resource {{ item.id }} --subscription {{ azure_service_principal.subscription_id }}"
+    loop: "{{ azure_keyvault_list }}"
+    register: azure_monitor_diagnostic_settings_list_raw
+    changed_when: false
+
+  - name: SETUP | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format Azure Monitor Diagnostic Settings List
+    set_fact:
+      azure_monitor_diagnostic_settings_list: '{{ azure_monitor_diagnostic_settings_list_raw | json_query("results[*].stdout") | map("from_json") | list | default([],true) }}'
+
+  - name: SETUP | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: '[].value[?logs[0].enabled == `false` || storageAccountId == `null` || logs[0].retentionPolicy.days < `180`][].{enabled:logs[0].enabled,storageAccountId:storageAccountId,days:logs[0].retentionPolicy.days}'
+
+  - name: SETUP | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "sum([length([?value == `[]`]),length( {{ evidence_query }} )])"
+
+  - name: SETUP | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_failure: "{{ (azure_keyvault_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_monitor_diagnostic_settings_list  | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_monitor_diagnostic_settings_list | json_query(evidence_query) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'fail' if this_rule.is_failure else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ 'No Key Vaults Exist' if this_rule.is_failure else (this_rule.test.evidence | default(None)) }}"
+
+  - name: REPORT | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+  when:
+    - azfcis_rule_5_1_5
+  tags:
+    - level1
+    - section5
+    - rule_5.1.5

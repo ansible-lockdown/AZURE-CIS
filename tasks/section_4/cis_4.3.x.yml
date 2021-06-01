@@ -1,0 +1,546 @@
+---
+# 4.3 PostgreSQL Database Server
+- name: SETUP | SECTION 4.3 | Postgres Server List
+  block:
+  - name: "SETUP | SECTION 4.3 | Get Postgres Server List"
+    command: "az postgres server list"
+    register: azure_postgres_server_list_raw
+    changed_when: false
+
+  - name: "SETUP | SECTION 4.3 | Format Postgres Server List"
+    set_fact:
+      azure_postgres_server_list: "{{ azure_postgres_server_list_raw.stdout | from_json | default([],true) }}"
+
+  - name: "SETUP | SECTION 4.3 | Set Evidence Message"
+    set_fact:
+      exception_evidence_message: 'No PostgreSQL Database Servers Exist'
+
+  when:
+    - azfcis_section4
+    - azfcis_rule_4_3_1 or
+      azfcis_rule_4_3_3 or
+      azfcis_rule_4_3_4 or
+      azfcis_rule_4_3_5 or
+      azfcis_rule_4_3_6 or
+      azfcis_rule_4_3_7 or
+      azfcis_rule_4_3_8
+  tags:
+    - section4
+    - rule_4.3.1
+    - rule_4.3.3
+    - rule_4.3.4
+    - rule_4.3.5
+    - rule_4.3.6
+    - rule_4.3.7
+    - rule_4.3.8
+
+
+- name: SETUP | SECTION 4.3 | Postgres Server Configuration List
+  block:
+  - name: "SETUP | SECTION 4.3 | Get Postgres Server Configuration List"
+    command: "az postgres server configuration list --server-name {{ item.name }} --resource-group {{ item.resourceGroup }}"
+    loop: "{{ azure_postgres_server_list }}"
+    register: azure_postgres_server_configuration_list_raw
+    changed_when: false
+
+  - name: "SETUP | SECTION 4.3 | Format Postgres Server Configuration List"
+    set_fact:
+      azure_postgres_server_configuration_list: '{{ azure_postgres_server_configuration_list_raw | json_query("results[*].stdout") | map("from_json") | list | default([],true) }}'
+
+  when:
+    - azfcis_section4
+    - azfcis_rule_4_3_3 or
+      azfcis_rule_4_3_4 or
+      azfcis_rule_4_3_5 or
+      azfcis_rule_4_3_6 or
+      azfcis_rule_4_3_7
+  tags:
+    - section4
+    - rule_4.3.3
+    - rule_4.3.4
+    - rule_4.3.5
+    - rule_4.3.6
+    - rule_4.3.7
+
+
+- name: AUTOMATED | 4.3.1 | AUDIT | Ensure 'Enforce SSL connection' is set to 'ENABLED' for PostgreSQL Database Server
+  block:
+  - name: AUTOMATED | 4.3.1 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "4.3.1"
+        level: "1"
+        title: Ensure 'Enforce SSL connection' is set to 'ENABLED' for PostgreSQL Database Server
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[?sslEnforcement!=`Enabled`]"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_postgres_server_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_postgres_server_list | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_postgres_server_list | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set 'Enforce SSL connection' is set to 'ENABLED'
+    command: "az postgres server update --resource-group {{ item.resourceGroup }} --name {{ item.name }} --ssl-enforcement Enabled"
+    loop: "{{ azure_postgres_server_list }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_4_3_1
+  tags:
+    - level1
+    - section4
+    - rule_4.3.1
+
+
+- name: AUTOMATED | 4.3.2 | AUDIT | Ensure that 'Auditing' is set to 'On'
+  block:
+  - name: AUTOMATED | 4.3.2 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "4.3.2"
+        level: "1"
+        title: Ensure that 'Auditing' is set to 'On'
+
+  - name: "AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get MySql Server List"
+    command: "az mysql server list --subscription {{ azure_service_principal.subscription_id }}"
+    register: azure_mysql_server_list_raw
+    changed_when: false
+
+  - name: "AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format MySql Server List"
+    set_fact:
+      azure_mysql_server_list: "{{ azure_mysql_server_list_raw.stdout | from_json | default([],true) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[?sslEnforcement!=`Enabled`]"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_mysql_server_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_mysql_server_list | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_mysql_server_list | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ 'No MySql Servers Exist' if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set 'Auditing' to 'On'
+    command: "az mysql server update --resource-group {{ item.resourceGroup }} --name {{ item.name }} --ssl-enforcement Enabled"
+    loop: "{{ azure_mysql_server_list }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_4_3_2
+  tags:
+    - level1
+    - section4
+    - rule_4.3.2
+
+
+- name: AUTOMATED | 4.3.3 | AUDIT | Ensure server parameter 'log_checkpoints' is set to 'ON' for PostgreSQL Database Server
+  block:
+  - name: AUTOMATED | 4.3.3 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "4.3.3"
+        level: "1"
+        title: Ensure server parameter 'log_checkpoints' is set to 'ON' for PostgreSQL Database Server
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[] | [?name==`log_checkpoints` && value!=`on`]"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_postgres_server_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_postgres_server_configuration_list | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_postgres_server_configuration_list | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set 'log_checkpoints' to 'ON'
+    command: "az postgres server configuration set --resource-group {{ item.resourceGroup }} --server-name {{ item.name }} --name log_checkpoints --value on"
+    loop: "{{ azure_postgres_server_list }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_4_3_3
+  tags:
+    - level1
+    - section4
+    - rule_4.3.3
+
+
+- name: AUTOMATED | 4.3.4 | AUDIT | Ensure server parameter 'log_connections' is set to 'ON' for PostgreSQL Database Server
+  block:
+  - name: AUTOMATED | 4.3.4 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "4.3.4"
+        level: "1"
+        title: Ensure server parameter 'log_connections' is set to 'ON' for PostgreSQL Database Server
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[] | [?name==`log_connections` && value!=`on`]"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_postgres_server_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_postgres_server_configuration_list | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_postgres_server_configuration_list | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set 'log_connections' to 'ON'
+    command: "az postgres server configuration set --resource-group {{ item.resourceGroup }} --server-name {{ item.name }} --name log_connections --value on"
+    loop: "{{ azure_postgres_server_list }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_4_3_4
+  tags:
+    - level1
+    - section4
+    - rule_4.3.4
+
+
+- name: AUTOMATED | 4.3.5 | AUDIT | Ensure server parameter 'log_disconnections' is set to 'ON' for PostgreSQL Database Server
+  block:
+  - name: AUTOMATED | 4.3.5| AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "4.3.5"
+        level: "1"
+        title: Ensure server parameter 'log_disconnections' is set to 'ON' for PostgreSQL Database Server
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[] | [?name==`log_disconnections` && value!=`on`]"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_postgres_server_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_postgres_server_configuration_list | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_postgres_server_configuration_list | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set 'log_disconnections' to 'ON'
+    command: "az postgres server configuration set --resource-group {{ item.resourceGroup }} --server-name {{ item.name }} --name log_disconnections --value on"
+    loop: "{{ azure_postgres_server_list }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_4_3_5
+  tags:
+    - level1
+    - section4
+    - rule_4.3.5
+
+
+- name: AUTOMATED | 4.3.6 | AUDIT | Ensure server parameter 'connection_throttling' is set to 'ON' for PostgreSQL Database Server
+  block:
+  - name: AUTOMATED | 4.3.6 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "4.3.6"
+        level: "1"
+        title: Ensure server parameter 'connection_throttling' is set to 'ON' for PostgreSQL Database Server
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[] | [?name==`connection_throttling` && value!=`on`]"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_postgres_server_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_postgres_server_configuration_list | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_postgres_server_configuration_list | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set 'connection_throttling' to 'ON'
+    command: "az postgres server configuration set --resource-group {{ item.resourceGroup }} --server-name {{ item.name }} --name connection_throttling --value on"
+    loop: "{{ azure_postgres_server_list }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_4_3_6
+  tags:
+    - level1
+    - section4
+    - rule_4.3.6
+
+
+- name: AUTOMATED | 4.3.7 | AUDIT | Ensure server parameter 'log_retention_days' is greater than 3 days for PostgreSQL Database Server
+  block:
+  - name: AUTOMATED | 4.3.7 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "4.3.7"
+        level: "1"
+        title: Ensure server parameter 'log_retention_days' is greater than 3 days for PostgreSQL Database Server
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[] | [?name==`log_retention_days` && to_number(value) > `3`]"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_postgres_server_list  == []) | bool }}"
+        test:
+          source: "{{ azure_postgres_server_configuration_list | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_postgres_server_configuration_list | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set 'log_retention_days' to 'ON'
+    command: "az postgres server configuration set --resource-group {{ item.resourceGroup }} --server-name {{ item.name }} --name log_retention_days --value on"
+    loop: "{{ azure_postgres_server_list }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_4_3_7
+  tags:
+    - level1
+    - section4
+    - rule_4.3.7
+
+
+- name: AUTOMATED | 4.3.8 | AUDIT | Ensure 'Allow access to Azure services' for PostgreSQL Database Server is disabled
+  block:
+  - name: AUTOMATED | 4.3.8 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "4.3.8"
+        level: "1"
+        title: Ensure 'Allow access to Azure services' for PostgreSQL Database Server is disabled
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get Postgres Server Firewall Rule List
+    command: "az postgres server firewall-rule list --server {{ item.name }} --resource-group {{ item.resourceGroup }}"
+    loop: "{{ azure_postgres_server_list }}"
+    register: azure_postgres_server_firewall_rule_list_raw
+    changed_when: false
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format Postgres Server Firewall Rule List
+    set_fact:
+      azure_postgres_server_firewall_rule_list: '{{ azure_postgres_server_firewall_rule_list_raw | json_query("results[*].stdout") | map("from_json") | list }}'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[] | [?name==`AllowAllWindowsAzureIps`]"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_postgres_server_list  == []) | bool }}"
+        test:
+          source: "{{ azure_postgres_server_firewall_rule_list | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_postgres_server_firewall_rule_list | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Delete AllowAllWindowsAzureIps firewall rule
+    command: "az postgres server firewall-rule delete --resource-group {{ item.resourceGroup }} --server-name {{ item.name }} --name AllowAllWindowsAzureIps --yes"
+    loop: "{{ azure_postgres_server_list }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_4_3_8
+  tags:
+    - level1
+    - section4
+    - rule_4.3.8

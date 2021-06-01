@@ -1,0 +1,649 @@
+---
+# 9 AppService
+- name: SETUP | SECTION 9 | Web App List
+  block:
+  - name: SETUP | SECTION 9 | Get Web App List
+    command: "az webapp list --query '[].{name:name,resourceGroup:resourceGroup,id:id}' --subscription {{ azure_service_principal.subscription_id }}"
+    register: azure_webapp_list_raw
+    changed_when: false
+
+  - name: SETUP | SECTION 9 | Format Web App List
+    set_fact:
+      azure_webapp_list: "{{ azure_webapp_list_raw.stdout | from_json | default([],true) }}"
+
+  - name: SETUP | SECTION 9 | Get Web App Show
+    command: "az webapp show --query '{name:name,resourceGroup:resourceGroup,httpsOnly:httpsOnly,clientCertEnabled:clientCertEnabled}' --resource-group {{ item.resourceGroup }} --name {{ item.name }} --subscription {{ azure_service_principal.subscription_id }}"
+    loop: "{{ azure_webapp_list }}"
+    register: azure_webapp_show_raw
+    changed_when: false
+
+  - name: SETUP | SECTION 9 | Format Web App Show
+    set_fact:
+      azure_webapp_show: '{{ azure_webapp_show_raw | json_query("results[*].stdout") | map("from_json") | list | default([],true) }}'
+
+  - name: SETUP | SECTION 9 | Get Web App Config Show
+    command: "az webapp config show --resource-group {{ item.resourceGroup }} --name {{ item.name }} --subscription {{ azure_service_principal.subscription_id }}"
+    loop: "{{ azure_webapp_list }}"
+    register: azure_webapp_config_show_raw
+    changed_when: false
+
+  - name: SETUP | SECTION 9 | Format Web App Config Show
+    set_fact:
+      azure_webapp_config_show: '{{ azure_webapp_config_show_raw | json_query("results[*].stdout") | map("from_json") | list | default([],true) }}'
+
+  - name: SETUP | SECTION 9 | Set Exception Message
+    set_fact:
+      exception_evidence_message: "No App Services Exist"
+
+  when:
+    - azfcis_section9
+    - azfcis_rule_9_1 or
+      azfcis_rule_9_2 or
+      azfcis_rule_9_3 or
+      azfcis_rule_9_4 or
+      azfcis_rule_9_5 or
+      azfcis_rule_9_6 or
+      azfcis_rule_9_7 or
+      azfcis_rule_9_8 or
+      azfcis_rule_9_9 or
+      azfcis_rule_9_10 or
+      azfcis_rule_9_11
+  tags:
+    - section9
+    - rule_9.1
+    - rule_9.2
+    - rule_9.3
+    - rule_9.4
+    - rule_9.5
+    - rule_9.6
+    - rule_9.7
+    - rule_9.8
+    - rule_9.9
+    - rule_9.10
+    - rule_9.11
+
+
+- name: AUTOMATION | 9.1 | AUDIT | Ensure App Service Authentication is set on Azure App Service
+  block:
+  - name: AUTOMATED | 9.1 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "9.1"
+        level: "2"
+        title: Ensure App Service Authentication is set on Azure App Service
+
+  - name: AUTOMATION | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get Web App Auth Show
+    command: "az webapp auth show --resource-group {{ item.resourceGroup }} --name {{ item.name }} --subscription {{ azure_service_principal.subscription_id }}"
+    loop: "{{ azure_webapp_list }}"
+    register: azure_webapp_auth_show_raw
+    changed_when: false
+
+  - name: AUTOMATION | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format KeyVault Key List
+    set_fact:
+      azure_webapp_auth_show: '{{ azure_webapp_auth_show_raw | json_query("results[*].stdout") | map("from_json") | list | default([],true) }}'
+
+  - name: AUTOMATION | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[] | [?enabled != `true`].{name:name,id:id,resourceGroup:resourceGroup,enabled:enabled}"
+
+  - name: AUTOMATION | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATION | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_webapp_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_webapp_auth_show | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_webapp_auth_show | json_query(evidence_query) }}"
+
+  - name: AUTOMATION | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATION | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  - name: AUTOMATION | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set App Service Authentication to On
+    command: "az webapp auth update --ids {{ item.id }} --enabled true --subscription {{ azure_service_principal.subscription_id }}"
+    loop: "{{ azure_webapp_list }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_9_1
+  tags:
+    - level1
+    - section9
+    - rule_9.1
+
+
+- name: AUTOMATION | 9.2 | AUDIT | Ensure web app redirects all HTTP traffic to HTTPS in Azure App Service
+  block:
+  - name: AUTOMATED | 9.2 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "9.2"
+        level: "1"
+        title: Ensure web app redirects all HTTP traffic to HTTPS in Azure App Service
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[] | [?httpsOnly != `true`].{name:name,resourceGroup:resourceGroup,httpsOnly:httpsOnly}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_webapp_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_webapp_show | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_webapp_show | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set App Service to HTTPS
+    command: "az webapp update --ids {{ item.id }} --set httpsOnly=true --subscription {{ azure_service_principal.subscription_id }}"
+    loop: "{{ azure_webapp_list }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_9_2
+  tags:
+    - level1
+    - section9
+    - rule_9.2
+
+
+- name: AUTOMATION | 9.3 | AUDIT | Ensure web app is using the latest version of TLS encryption
+  block:
+  - name: AUTOMATED | 9.3 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "9.3"
+        level: "1"
+        title: Ensure web app is using the latest version of TLS encryption
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: '[] | [?minTlsVersion != `"1.2"`].{name:name,resourceGroup:resourceGroup,minTlsVersion:minTlsVersion}'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_webapp_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_webapp_config_show | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_webapp_config_show | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set App Service to TLS 1.2
+    command: "az webapp config set --ids {{ item.id }} --min-tls-version 1.2 --subscription {{ azure_service_principal.subscription_id }}"
+    loop: "{{ azure_webapp_list }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_9_3
+  tags:
+    - level1
+    - section9
+    - rule_9.3
+
+
+- name: AUTOMATION | 9.4 | AUDIT | Ensure the web app has 'Client Certificates (Incoming client certificates)' set to 'On'
+  block:
+  - name: AUTOMATED | 9.4 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "9.4"
+        level: "2"
+        title: Ensure the web app has 'Client Certificates (Incoming client certificates)' set to 'On'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: '[] | [?clientCertEnabled != `true`].{name:name,resourceGroup:resourceGroup,clientCertEnabled:clientCertEnabled}'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_webapp_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_webapp_show | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_webapp_show | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  - name: SETUP | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set App Service to Client Certificates to ON
+    command: "az webapp update --ids {{ item.id }} --set clientCertEnabled=true --subscription {{ azure_service_principal.subscription_id }}"
+    loop: "{{ azure_webapp_list }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_9_4
+  tags:
+    - level1
+    - section9
+    - rule_9.4
+
+
+
+- name: AUTOMATION | 9.5 | AUDIT | Ensure that Register with Azure Active Directory is enabled on App Service
+  block:
+  - name: AUTOMATED | 9.5 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "9.5"
+        level: "1"
+        title: Ensure that Register with Azure Active Directory is enabled on App Service
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get Web App Identity Show
+    shell: "az webapp identity show --resource-group {{ item.resourceGroup }} --name {{ item.name }} --subscription {{ azure_service_principal.subscription_id }} "
+    loop: "{{ azure_webapp_list }}"
+    register: azure_webapp_identity_show_raw
+    changed_when: false
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Clean Web App Identity Show
+    set_fact: #had to get creative here because stdout was coming back as empty string
+      azure_webapp_identity_show: "{{ azure_webapp_identity_show_raw | json_query('results[*]') | list | default([],true) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: '[] | [?stdout == ``].item'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_webapp_list  == []) | bool }}"
+        test: 
+          source: "{{ azure_webapp_identity_show | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_webapp_identity_show | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set Register with Azure Active Directory to Enabled
+    command: "az webapp identity assign --ids {{ item.id }}"
+    loop: "{{ azure_webapp_list }}"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_9_5
+  tags:
+    - level1
+    - section9
+    - rule_9.5
+
+
+- name: MANUAL | 9.6 | AUDIT | Ensure that 'PHP version' is the latest, if used to run the web app
+  block:
+  - name: MANUAL | 9.6 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "9.6"
+        level: "1"
+        title: Ensure that 'PHP version' is the latest, if used to run the web app
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: '[].{name:name,resourceGroup:resourceGroup,phpVersion:phpVersion}'
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_webapp_list  == []) | bool }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: "{{ azure_webapp_config_show | json_query(evidence_query) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_9_6
+    - do_manual
+  tags:
+    - level1
+    - section9
+    - rule_9.6
+
+
+- name: MANUAL | 9.7 | AUDIT | Ensure that 'Python version' is the latest, if used to run the web app
+  block:
+  - name: MANUAL | 9.7 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "9.7"
+        level: "1"
+        title: Ensure that 'Python version' is the latest, if used to run the web app
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: '[].{name:name,resourceGroup:resourceGroup,pythonVersion:pythonVersion}'
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_webapp_list  == []) | bool }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: "{{ azure_webapp_config_show | json_query(evidence_query) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_9_7
+    - do_manual
+  tags:
+    - level1
+    - section9
+    - rule_9.7
+
+
+- name: MANUAL | 9.8 | AUDIT | Ensure that 'Java version' is the latest, if used to run the web app
+  block:
+  - name: MANUAL | 9.8 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "9.8"
+        level: "1"
+        title: Ensure that 'Java version' is the latest, if used to run the web app
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: '[].{name:name,resourceGroup:resourceGroup, javaVersion: javaVersion}'
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_webapp_list  == []) | bool }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: "{{ azure_webapp_config_show | json_query(evidence_query) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_9_8
+    - do_manual
+  tags:
+    - level1
+    - section9
+    - rule_9.8
+
+
+- name: MANUAL | 9.9 | AUDIT | Ensure that 'HTTP Version' is the latest, if used to run the web app
+  block:
+  - name: MANUAL | 9.9 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "9.9"
+        level: "1"
+        title: Ensure that 'HTTP Version' is the latest, if used to run the web app
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: '[].{name:name,resourceGroup:resourceGroup,http20Enabled:http20Enabled}'
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_webapp_list  == []) | bool }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: "{{ azure_webapp_config_show | json_query(evidence_query) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_9_9
+    - do_manual
+  tags:
+    - level1
+    - section9
+    - rule_9.9
+
+
+- name: MANUAL | 9.10 | AUDIT | Ensure FTP deployments are disabled
+  block:
+  - name: MANUAL | 9.10 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "9.10"
+        level: "1"
+        title: Ensure FTP deployments are disabled
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get Web App Deployment list-publishing-profiles
+    shell: "az webapp deployment list-publishing-profiles --ids {{ item.id }}"
+    loop: "{{ azure_webapp_list }}"
+    register: azure_webapp_deployment_list_publishing_profiles_raw
+    changed_when: false
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Format Web App Deployment list-publishing-profiles
+    set_fact:
+      azure_webapp_deployment_list_publishing_profiles: "{{ azure_webapp_deployment_list_publishing_profiles_raw | json_query('results[*].stdout') | map('from_json') | list | default([],true) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: '[] | [?publishMethod == `FTP`].{publishUrl:publishUrl,userName:userName}'
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_webapp_list  == []) | bool }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: "{{ azure_webapp_deployment_list_publishing_profiles | json_query(evidence_query) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ exception_evidence_message if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_9_10
+    - do_manual
+  tags:
+    - level1
+    - section9
+    - rule_9.10

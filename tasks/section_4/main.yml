@@ -1,0 +1,19 @@
+---
+# 4 Database Services
+- name: "SECTION | Preliminary"
+  include: cis_4_prelim.yml
+
+- name: "SECTION | 4.1 | SQL Server - Auditing"
+  include: cis_4.1.x.yml
+
+- name: "SECTION | 4.2 | SQL Server - Advanced Data Security (ADS)"
+  include: cis_4.2.x.yml
+
+- name: "SECTION | 4.3 | PostgreSQL Database Server"
+  include: cis_4.3.x.yml
+
+- name: "SECTION | 4.4 | Ensure that Azure Active Directory Admin is configured"
+  include: cis_4.4.x.yml
+
+- name: "SECTION | 4.5 | Ensure SQL server's TDE protector is encrypted with Customer managed key"
+  include: cis_4.5.x.yml

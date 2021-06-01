@@ -1,0 +1,1166 @@
+---
+##############################################
+# Get Azure Access Token and Subscription ID #
+##############################################
+- name: "SETUP | SECTION 2 | Azure Access Token"
+  block:
+  - name: "SETUP | SECTION 2 | Request Azure Access Token"
+    command: az account get-access-token
+    register: request_azure_access_token_output
+    changed_when: false
+
+  - name: "SETUP | SECTION 2 | Extract Azure Subscription ID and Access Token"
+    set_fact:
+      azure_subscription_id: "{{ (request_azure_access_token_output.stdout | from_json).subscription }}"
+      azure_access_token: "{{ (request_azure_access_token_output.stdout | from_json).accessToken }}"
+
+  when:
+    - azfcis_section2
+    - azfcis_rule_2_1 or
+      azfcis_rule_2_2 or
+      azfcis_rule_2_3 or
+      azfcis_rule_2_4 or
+      azfcis_rule_2_5 or
+      azfcis_rule_2_6 or
+      azfcis_rule_2_7 or
+      azfcis_rule_2_8 or
+      azfcis_rule_2_9 or
+      azfcis_rule_2_10 or
+      azfcis_rule_2_11 or
+      azfcis_rule_2_12 or
+      azfcis_rule_2_13 or
+      azfcis_rule_2_14 or
+      azfcis_rule_2_15
+  tags: 
+    - section2
+    - rule_2.1
+    - rule_2.2
+    - rule_2.3
+    - rule_2.4
+    - rule_2.5
+    - rule_2.6
+    - rule_2.7
+    - rule_2.8
+    - rule_2.9
+    - rule_2.10
+    - rule_2.11
+    - rule_2.12
+    - rule_2.13
+    - rule_2.14
+    - rule_2.15
+
+- name: "SETUP | SECTION 2 | Security Pricing"
+  block:
+  - name: "SETUP | SECTION 2 | Get Security Pricing"
+    uri:
+      method: GET
+      url: https://management.azure.com/subscriptions/{{ azure_subscription_id }}/providers/Microsoft.Security/pricings?api-version=2018-06-01
+      headers:
+        Authorization: Bearer {{ azure_access_token }}
+    register: azure_security_pricing_raw
+
+
+
+  - name: "SETUP | SECTION 2 | Format Security Pricing"
+    set_fact:
+      azure_security_pricing_virtual_machine:                 "{{ azure_security_pricing_raw.json.value | json_query('[?name==`VirtualMachines`]') | default([],true) }}"
+      azure_security_pricing_app_services:                    "{{ azure_security_pricing_raw.json.value | json_query('[?name==`AppServices`]') | default([],true) }}"
+      azure_security_pricing_sql_servers:                     "{{ azure_security_pricing_raw.json.value | json_query('[?name==`SqlServers`]') | default([],true) }}"
+      azure_security_pricing_sql_sql_server_virtual_machines: "{{ azure_security_pricing_raw.json.value | json_query('[?name==`SqlServerVirtualMachines`]') | default([],true) }}"
+      azure_security_pricing_storage_accounts:                "{{ azure_security_pricing_raw.json.value | json_query('[?name==`StorageAccounts`]') | default([],true) }}"
+      azure_security_pricing_kubernetes_service:              "{{ azure_security_pricing_raw.json.value | json_query('[?name==`KubernetesService`]') | default([],true) }}"
+      azure_security_pricing_container_registry:              "{{ azure_security_pricing_raw.json.value | json_query('[?name==`ContainerRegistry`]') | default([],true) }}"
+      azure_security_pricing_key_vaults:                      "{{ azure_security_pricing_raw.json.value | json_query('[?name==`KeyVaults`]') | default([],true) }}"
+      azure_security_pricing_wdatp:                           "{{ azure_security_pricing_raw.json.value | json_query('[?name==`WDATP`]') | default([],true) }}"
+      azure_security_pricing_mcas:                            "{{ azure_security_pricing_raw.json.value | json_query('[?name==`MCAS`]') | default([],true) }}"
+
+  when:
+    - azfcis_section2
+    - azfcis_rule_2_1 or
+      azfcis_rule_2_2 or
+      azfcis_rule_2_3 or
+      azfcis_rule_2_4 or
+      azfcis_rule_2_5 or
+      azfcis_rule_2_6 or
+      azfcis_rule_2_7 or
+      azfcis_rule_2_8 or
+      azfcis_rule_2_9 or
+      azfcis_rule_2_10
+  tags: 
+    - section2
+    - rule_2.1
+    - rule_2.2
+    - rule_2.3
+    - rule_2.4
+    - rule_2.5
+    - rule_2.6
+    - rule_2.7
+    - rule_2.8
+    - rule_2.9
+    - rule_2.10
+
+# - name: "SETUP | SECTION 2 | Security Settings"
+#   uri:
+#     method: GET
+#     url: https://management.azure.com/subscriptions/{{ azure_subscription_id }}/providers/Microsoft.Security/settings?api-version=2019-01-01
+#     headers:
+#       Authorization: Bearer {{ azure_access_token }}
+#     return_content: no
+#   register: azure_security_settings
+
+#   when:
+#     - azfcis_section2
+#     - azfcis_rule_2_7 or
+#       azfcis_rule_2_8
+#   tags: 
+#     - section2
+#     - rule_2.7
+#     - rule_2.8
+
+- name: "SETUP | SECTION 2 | Get Security Contacts"
+  uri:
+    method: GET
+    url: https://management.azure.com/subscriptions/{{ azure_subscription_id }}/providers/Microsoft.Security/securityContacts?api-version=2017-08-01-preview
+    headers:
+      Authorization: Bearer {{ azure_access_token }}
+    return_content: no
+  register: azure_security_contacts
+
+  when:
+    - azfcis_section2
+    - azfcis_rule_2_13 or
+      azfcis_rule_2_14 or
+      azfcis_rule_2_15
+  tags: 
+    - section2
+    - rule_2.13
+    - rule_2.14
+    - rule_2.15
+
+
+- name: AUTOMATED | 2.1 | AUDIT | Ensure that Azure Defender is set to "On" for Servers
+  block:
+  - name: AUTOMATED | 2.1 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "2.1"
+        level: "2"
+        title: Ensure that Azure Defender is set to "On" for Servers
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: '[?properties.pricingTier != `Standard`].{id:id,pricingTier:properties.pricingTier}'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_security_pricing_virtual_machine == []) | bool }}"
+        test: 
+          source: "{{ azure_security_pricing_virtual_machine | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_security_pricing_virtual_machine | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ 'No Virtual Machine Security Pricing Exist' if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set Azure Defender to "On" for Virtual Machines
+    uri:
+      method: PUT
+      url: https://management.azure.com/subscriptions/{{ azure_subscription_id }}/providers/Microsoft.Security/pricings/VirtualMachines?api-version=2018-06-01
+      status_code: [200,201]
+      headers:
+        Authorization: Bearer {{ azure_access_token }}
+      return_content: yes
+      body_format: json
+      body:
+        id: "/subscriptions/{{ azure_subscription_id }}/providers/Microsoft.Security/pricings/VirtualMachines"
+        name: "VirtualMachines"
+        type: "Microsoft.Security/pricings"
+        properties:
+          pricingTier: "Standard"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_2_1
+  tags:
+    - level2
+    - section2
+    - rule_2.1
+
+
+- name: AUTOMATED | 2.2 | AUDIT | Ensure that Azure Defender is set to On for App Service
+  block:
+  - name: AUTOMATED | 2.2 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "2.2"
+        level: "2"
+        title: Ensure that Azure Defender is set to On for App Service
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: '[?properties.pricingTier != `Standard`].{id:id,pricingTier:properties.pricingTier}'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_security_pricing_app_services == []) | bool }}"
+        test: 
+          source: "{{ azure_security_pricing_app_services | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_security_pricing_app_services | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ 'No App Services Security Pricing Exist' if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set Azure Defender to "On" for App Services
+    uri:
+      method: PUT
+      url: https://management.azure.com/subscriptions/{{ azure_subscription_id }}/providers/Microsoft.Security/pricings/AppServices?api-version=2018-06-01
+      status_code: [200,201]
+      headers:
+        Authorization: Bearer {{ azure_access_token }}
+      return_content: yes
+      body_format: json
+      body:
+        id: "/subscriptions/{{ azure_subscription_id }}/providers/Microsoft.Security/pricings/AppServices"
+        name: "AppServices"
+        type: "Microsoft.Security/pricings"
+        properties:
+          pricingTier: "Standard"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_2_2
+  tags:
+    - level2
+    - section2
+    - rule_2.2
+
+- name: AUTOMATED | 2.3 | AUDIT | Ensure that Azure Defender is set to On for Azure SQL database servers
+  block:
+  - name: AUTOMATED | 2.3 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "2.3"
+        level: "2"
+        title: Ensure that Azure Defender is set to On for Azure SQL database servers
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: '[?properties.pricingTier != `Standard`].{id:id,pricingTier:properties.pricingTier}'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_security_pricing_sql_servers == []) | bool }}"
+        test: 
+          source: "{{ azure_security_pricing_sql_servers | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_security_pricing_sql_servers | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ 'No SQL Server Security Pricing Exist' if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set Azure Defender to "On" for Sql Servers
+    uri:
+      method: PUT
+      url: https://management.azure.com/subscriptions/{{ azure_subscription_id }}/providers/Microsoft.Security/pricings/SqlServers?api-version=2018-06-01
+      status_code: [200,201]
+      headers:
+        Authorization: Bearer {{ azure_access_token }}
+      return_content: yes
+      body_format: json
+      body:
+        id: "/subscriptions/{{ azure_subscription_id }}/providers/Microsoft.Security/pricings/SqlServers"
+        name: "SqlServers"
+        type: "Microsoft.Security/pricings"
+        properties:
+          pricingTier: "Standard"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_2_3
+  tags:
+    - level2
+    - section2
+    - rule_2.3
+
+
+- name: AUTOMATED | 2.4 | AUDIT | Ensure that Azure Defender is set to On for SQL servers on machines
+  block:
+  - name: AUTOMATED | 2.4 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "2.4"
+        level: "2"
+        title: Ensure that Azure Defender is set to On for SQL servers on machines
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: '[?properties.pricingTier != `Standard`].{id:id,pricingTier:properties.pricingTier}'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_security_pricing_sql_sql_server_virtual_machines == []) | bool }}"
+        test: 
+          source: "{{ azure_security_pricing_sql_sql_server_virtual_machines | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_security_pricing_sql_sql_server_virtual_machines | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ 'No SQL Server Virtual Machine Pricing Exist' if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set Azure Defender to "On" for Sql Servers
+    uri:
+      method: PUT
+      url: https://management.azure.com/subscriptions/{{ azure_subscription_id }}/providers/Microsoft.Security/pricings/SqlserverVirtualMachines?api-version=2018-06-01
+      status_code: [200,201]
+      headers:
+        Authorization: Bearer {{ azure_access_token }}
+      return_content: yes
+      body_format: json
+      body:
+        id: "/subscriptions/{{ azure_subscription_id }}/providers/Microsoft.Security/pricings/SqlserverVirtualMachines"
+        name: "SqlserverVirtualMachines"
+        type: "Microsoft.Security/pricings"
+        properties:
+          pricingTier: "Standard"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_2_4
+  tags:
+    - level2
+    - section2
+    - rule_2.4
+
+
+- name: AUTOMATED | 2.5 | AUDIT | Ensure that Azure Defender is set to On for Storage
+  block:
+  - name: AUTOMATED | 2.5 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "2.5"
+        level: "2"
+        title: Ensure that Azure Defender is set to On for Storage
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: '[?properties.pricingTier != `Standard`].{id:id,pricingTier:properties.pricingTier}'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_security_pricing_storage_accounts == []) | bool }}"
+        test: 
+          source: "{{ azure_security_pricing_storage_accounts | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_security_pricing_storage_accounts | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ 'No Storage Security Pricing Exist' if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set Azure Defender to "On" for Storage Accounts
+    uri:
+      method: PUT
+      url: https://management.azure.com/subscriptions/{{ azure_subscription_id }}/providers/Microsoft.Security/pricings/StorageAccounts?api-version=2018-06-01
+      status_code: [200,201]
+      headers:
+        Authorization: Bearer {{ azure_access_token }}
+      return_content: yes
+      body_format: json
+      body:
+        id: "/subscriptions/{{ azure_subscription_id }}/providers/Microsoft.Security/pricings/StorageAccounts"
+        name: "StorageAccounts"
+        type: "Microsoft.Security/pricings"
+        properties:
+          pricingTier: "Standard"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_2_5
+  tags:
+    - level2
+    - section2
+    - rule_2.5
+
+
+- name: AUTOMATED | 2.6 | AUDIT | Ensure that Azure Defender is set to On for Kubernetes
+  block:
+  - name: AUTOMATED | 2.6 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "2.6"
+        level: "2"
+        title: Ensure that Azure Defender is set to On for Kubernetes
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: '[?properties.pricingTier != `Standard`].{id:id,pricingTier:properties.pricingTier}'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_security_pricing_kubernetes_service == []) | bool }}"
+        test: 
+          source: "{{ azure_security_pricing_kubernetes_service | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_security_pricing_kubernetes_service | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ 'No Kubernetes Security Pricing Exist' if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_2_6
+  tags:
+    - level2
+    - section2
+    - rule_2.6
+
+
+- name: NEW | 2.7 | AUDIT | Ensure that Azure Defender is set to On for Container Registries
+  block:
+  - name: NEW | 2.7 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "2.7"
+        level: "2"
+        title: Ensure that Azure Defender is set to On for Container Registries
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: '[?properties.pricingTier != `Standard`].{id:id,pricingTier:properties.pricingTier}'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_security_pricing_container_registry == []) | bool }}"
+        test: 
+          source: "{{ azure_security_pricing_container_registry | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_security_pricing_container_registry | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ 'No SQL Server Virtual Machine Pricing Exist' if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set Azure Defender to "On" for Sql Servers
+    uri:
+      method: PUT
+      url: https://management.azure.com/subscriptions/{{ azure_subscription_id }}/providers/Microsoft.Security/pricings/ContainerRegistry?api-version=2018-06-01
+      status_code: [200,201]
+      headers:
+        Authorization: Bearer {{ azure_access_token }}
+      return_content: yes
+      body_format: json
+      body:
+        id: "/subscriptions/{{ azure_subscription_id }}/providers/Microsoft.Security/pricings/ContainerRegistry"
+        name: "ContainerRegistry"
+        type: "Microsoft.Security/pricings"
+        properties:
+          pricingTier: "Standard"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_2_7
+  tags:
+    - level2
+    - section2
+    - rule_2.7
+#azure_security_pricing_container_registry
+
+
+- name: AUTOMATED | 2.8 | AUDIT | Ensure that Azure Defender is set to On for Key Vault
+  block:
+  - name: AUTOMATED | 2.8 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "2.8"
+        level: "2"
+        title: Ensure that Azure Defender is set to On for Key Vault
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: '[?properties.pricingTier != `Standard`].{id:id,pricingTier:properties.pricingTier}'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_security_pricing_key_vaults == []) | bool }}"
+        test: 
+          source: "{{ azure_security_pricing_key_vaults | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_security_pricing_key_vaults | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ 'No SQL Server Pricing Exist' if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_2_8
+  tags:
+    - level2
+    - section2
+    - rule_2.8
+
+
+- name: AUTOMATED | 2.9 | AUDIT | Ensure that Windows Defender ATP (WDATP) integration with Security Center is selected
+  block:
+  - name: AUTOMATED | 2.9 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "2.9"
+        level: "2"
+        title: Ensure that Windows Defender ATP (WDATP) integration with Security Center is selected
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: '[?properties.pricingTier != `Standard`].{id:id,pricingTier:properties.pricingTier}'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_security_pricing_wdatp == []) | bool }}"
+        test: 
+          source: "{{ azure_security_pricing_wdatp | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_security_pricing_wdatp | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ 'No WDATP Security Pricing Exist' if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Enable Windows Defender ATP (WDATP) integration with Security Center
+    uri:
+      method: PUT
+      url: https://management.azure.com/subscriptions/{{ azure_subscription_id }}/providers/Microsoft.Security/settings/WDATP?api-version=2019-01-01
+      status_code: [200,201]
+      headers:
+        Authorization: Bearer {{ azure_access_token }}
+      return_content: yes
+      body_format: json
+      body:
+        id: "/subscriptions/{{ azure_subscription_id }}/providers/Microsoft.Security/settings/WDATP"
+        name: "WDATP"
+        kind: "DataExportSettings"
+        type: "Microsoft.Security/settings"
+        properties:
+          enabled: true
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source
+
+  when:
+    - azfcis_rule_2_9
+  tags:
+    - level2
+    - section2
+    - rule_2.9
+
+
+- name: AUTOMATED | 2.10 | AUDIT | Ensure that Microsoft Cloud App Security (MCAS) integration with Security Center is selected
+  block:
+  - name: AUTOMATED | 2.10 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "2.10"
+        level: "2"
+        title: Ensure that Microsoft Cloud App Security (MCAS) integration with Security Center is selected
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: '[?properties.pricingTier != `Standard`].{id:id,pricingTier:properties.pricingTier}'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_security_pricing_mcas == []) | bool }}"
+        test: 
+          source: "{{ azure_security_pricing_mcas | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_security_pricing_mcas | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ 'No MCAS Security Pricing Exist' if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Enable Microsoft Cloud App Security (MCAS) integration with Security Center
+    uri:
+      method: PUT
+      url: https://management.azure.com/subscriptions/{{ azure_subscription_id }}/providers/Microsoft.Security/settings/MCAS?api-version=2019-01-01
+      status_code: [200,201]
+      headers:
+        Authorization: Bearer {{ azure_access_token }}
+      return_content: yes
+      body_format: json
+      body:
+        id: "/subscriptions/{{ azure_subscription_id }}/providers/Microsoft.Security/settings/MCAS"
+        name: "MCAS"
+        kind: "DataExportSettings"
+        type: "Microsoft.Security/settings"
+        properties:
+          enabled: true
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source
+
+  when:
+    - azfcis_rule_2_10
+  tags:
+    - level2
+    - section2
+    - rule_2.10
+
+
+- name: AUTOMATED | 2.11 | AUDIT | Ensure that 'Automatic provisioning of monitoring agent' is set to 'On'
+  block:
+  - name: AUTOMATED | 2.11 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "2.11"
+        level: "1"
+        title: Ensure that 'Automatic provisioning of monitoring agent' is set to 'On'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get Subscription Auto-Provision Settings
+    uri:
+      method: GET
+      url: https://management.azure.com/subscriptions/{{ azure_subscription_id }}/providers/Microsoft.Security/autoProvisioningSettings?api-version=2017-08-01-preview
+      headers:
+        Authorization: Bearer {{ azure_access_token }}
+      return_content: no
+    register: azure_subscription_auto_provisioning_settings
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: 'json.value[?name==`default` && properties.autoProvision != `On`].{name:name,autoProvision:properties.autoProvision}'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_subscription_auto_provisioning_settings == []) | bool }}"
+        test: 
+          source: "{{ azure_subscription_auto_provisioning_settings | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_subscription_auto_provisioning_settings | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ 'No Subscription Auto Provisioning Settings Exist' if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set Subscription Auto-Provision Settings
+    uri:
+      method: PUT
+      url: https://management.azure.com/subscriptions/{{ azure_subscription_id }}/providers/Microsoft.Security/autoProvisioningSettings/default?api-version=2017-08-01-preview
+      headers:
+        Authorization: Bearer {{ azure_access_token }}
+      return_content: yes
+      body_format: json
+      body:
+        id: "/subscriptions/{{ azure_subscription_id }}/providers/Microsoft.Security/autoProvisioningSettings/default"
+        name: "default"
+        type: "Microsoft.Security/autoProvisioningSettings"
+        properties:
+          autoProvision: "On"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_2_11
+  tags:
+    - level1
+    - section2
+    - rule_2.11
+
+
+- name: AUTOMATED | 2.12 | AUDIT | Ensure any of the ASC Default policy setting is not set to "Disabled"
+  block:
+  - name: AUTOMATED | 2.12 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "2.12"
+        level: "1"
+        title: Ensure any of the ASC Default policy setting is not set to "Disabled"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get Security Center Policy Assignments
+    uri:
+      method: GET
+      url: https://management.azure.com/subscriptions/{{ azure_subscription_id }}/providers/Microsoft.Authorization/policyAssignments/SecurityCenterBuiltIn?api-version=2018-05-01
+      headers:
+        Authorization: Bearer {{ azure_access_token }}
+      return_content: no
+      status_code: [200,404]
+    register: azure_security_center_policy_assignments
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: 'json.properties.metadata'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: 'json.properties.metadata.createdOn != `null` || json.properties.metadata.createdOn != `""`'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_exception: "{{ (azure_security_center_policy_assignments | json_query('json.error.code == `PolicyAssignmentNotFound`')) | bool }}"
+        test: 
+          source: "{{ azure_security_center_policy_assignments | json_query(source_query) }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_security_center_policy_assignments | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'exception' if this_rule.is_exception else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ 'No Subscription Auto Provisioning Settings Exist' if this_rule.is_exception else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_2_12
+  tags:
+    - level1
+    - section2
+    - rule_2.12
+
+
+- name: AUTOMATED | 2.13 | AUDIT | Ensure 'Additional email addresses' is configured with a security contact email
+  block:
+  - name: AUTOMATED | 2.13 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "2.13"
+        level: "1"
+        title: Ensure 'Additional email addresses' is configured with a security contact email
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: 'json.value'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_failure: "{{ (azure_security_contacts.json.value == []) | bool }}"
+        test: 
+          source: "{{ azure_security_contacts | json_query(source_query) | int > 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_security_contacts | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'failure' if this_rule.is_failure else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ 'No Security Contacts Exist' if this_rule.is_failure else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set Security Contacts Email Address
+    uri:
+      method: PUT
+      url: https://management.azure.com/subscriptions/{{ azure_subscription_id }}/providers/Microsoft.Security/securityContacts/default1?api-version=2017-08-01-preview
+      headers:
+        Authorization: Bearer {{ azure_access_token }}
+      return_content: yes
+      body_format: json
+      body:
+        id: "/subscriptions/{{ azure_subscription_id }}//providers/Microsoft.Security/securityContacts/default1"
+        name: "default1"
+        type: "Microsoft.Security/securityContacts"
+        properties:
+          email: "{{ azfcis_security_contacts_email_address }}"
+          alertNotifications: "On"
+          alertsToAdmins: "On"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_2_13
+  tags:
+    - level1
+    - section2
+    - rule_2.13
+
+
+- name: AUTOMATED | 2.14 | AUDIT | Ensure that 'Notify about alerts with the following severity' is set to 'High'
+  block:
+  - name: AUTOMATED | 2.14 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "2.14"
+        level: "1"
+        title: Ensure that 'Notify about alerts with the following severity' is set to 'High'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: 'json.value[?properties.alertNotifications != `On`]'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_failure: "{{ (azure_security_contacts.json.value == []) | bool }}"
+        test: 
+          source: "{{ azure_security_contacts | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_security_contacts | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'failure' if this_rule.is_failure else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ 'No Security Contacts Exist' if this_rule.is_failure else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set Security Contacts Email Address
+    uri:
+      method: PUT
+      url: https://management.azure.com/subscriptions/{{ azure_subscription_id }}/providers/Microsoft.Security/securityContacts/default1?api-version=2017-08-01-preview
+      headers:
+        Authorization: Bearer {{ azure_access_token }}
+      return_content: yes
+      body_format: json
+      body:
+        id: "/subscriptions/{{ azure_subscription_id }}//providers/Microsoft.Security/securityContacts/default1"
+        name: "default1"
+        type: "Microsoft.Security/securityContacts"
+        properties:
+          email: "{{ azfcis_security_contacts_email_address }}"
+          alertNotifications: "On"
+          alertsToAdmins: "On"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_2_14
+  tags:
+    - level1
+    - section2
+    - rule_2.14
+
+
+- name: AUTOMATED | 2.15 | AUDIT | Ensure that 'All users with the following roles' is set to 'Owner'
+  block:
+  - name: AUTOMATED | 2.15 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "2.15"
+        level: "1"
+        title: Ensure that 'All users with the following roles' is set to 'Owner'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: 'json.value[?properties.alertsToAdmins != `On`]'
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        is_failure: "{{ (azure_security_contacts.json.value == []) | bool }}"
+        test: 
+          source: "{{ azure_security_contacts | json_query(source_query) | int == 0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: "{{ azure_security_contacts | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ 'failure' if this_rule.is_failure else (( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] )) }}"
+          evidence: "{{ 'No Security Contacts Exist' if this_rule.is_failure else (this_rule.test.evidence | default(None)) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  - name: AUTOMATED | {{ this_rule.id }} | PATCH | L{{ this_rule.level }} | {{ this_rule.title }} | Set Security Contacts Email Address
+    uri:
+      method: PUT
+      url: https://management.azure.com/subscriptions/{{ azure_subscription_id }}/providers/Microsoft.Security/securityContacts/default1?api-version=2017-08-01-preview
+      headers:
+        Authorization: Bearer {{ azure_access_token }}
+      return_content: yes
+      body_format: json
+      body:
+        id: "/subscriptions/{{ azure_subscription_id }}//providers/Microsoft.Security/securityContacts/default1"
+        name: "default1"
+        type: "Microsoft.Security/securityContacts"
+        properties:
+          email: "{{ azfcis_security_contacts_email_address }}"
+          alertNotifications: "On"
+          alertsToAdmins: "On"
+    changed_when: true
+    when:
+      - disruption_high
+      - this_rule.test.source == false
+
+  when:
+    - azfcis_rule_2_15
+  tags:
+    - level1
+    - section2
+    - rule_2.15

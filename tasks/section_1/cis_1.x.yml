@@ -1,0 +1,1115 @@
+---
+- name: SETUP | SECTION 1 | Get Microsoft Graph Access Token 
+  block: 
+  # Thank you, Nicola Suter!!! (see https://tech.nicolonsky.ch/explaining-microsoft-graph-access-token-acquisition/)
+
+  - name: SETUP | SECTION 1 | Get Microsoft Graph Access Token | Request Token
+    uri:
+      method: POST
+      url: https://login.microsoftonline.com/{{ azure_service_principal.tenant_id }}/oauth2/v2.0/token
+      body_format: form-urlencoded
+      body:
+        scope: "{{ '.default' | msgraph_scope }}"
+        grant_type: "client_credentials"
+        client_secret: "{{ azure_service_principal.client_key}}"
+        client_info: 1
+        client_id: "{{ azure_service_principal.client_id }}"
+    register: request_graph_access_token_output
+
+  - name: SETUP | SETUP | SECTION 1 | Get Microsoft Graph Access Token | Extract Graph Authorization Header
+    set_fact:
+      msgraph_auth_header: "{{ request_graph_access_token_output.json.token_type }} {{ request_graph_access_token_output.json.access_token }}"
+      msgraph_auth_token: "{{ request_graph_access_token_output.json.access_token }}"
+
+  when:
+    - azfcis_section1
+    - azfcis_rule_1_1 or
+      azfcis_rule_1_2 or
+      azfcis_rule_1_3
+  tags: 
+    - section1
+    - azfcis_rule_1.1
+    - azfcis_rule_1.2
+    - azfcis_rule_1.3
+
+- name: SETUP | SECTION 1 | Get Microsoft Azure Access Token 
+  block:
+  - name: SETUP | SECTION 1 | Get Microsoft Azure Access Token | Request Azure Access Token
+    command: az account get-access-token
+    register: request_azure_access_token_output
+    changed_when: false
+
+  - name: SETUP | SECTION 1 | Get Microsoft Azure Access Token | Extract Azure Authorization Header and Subscription Id
+    set_fact:
+      azure_auth_header: Bearer {{ (request_azure_access_token_output.stdout | from_json).accessToken }}
+      azure_auth_token: "{{ (request_azure_access_token_output.stdout | from_json).accessToken }}"
+      azure_subscription_id: "{{ (request_azure_access_token_output.stdout | from_json).subscription }}"
+
+  when:
+    - azfcis_section1
+    - azfcis_rule_1_1 or
+      azfcis_rule_1_2 or
+      azfcis_rule_1_3 or
+      azfcis_rule_1_21
+  tags: 
+    - section1
+    - azfcis_rule_1.1
+    - azfcis_rule_1.2
+    - azfcis_rule_1.3
+    - azfcis_rule_1.21
+
+
+- name: SETUP | SECTION 1 | Request Lists of Users, Roles and Role Assignments
+  set_fact:
+    users: "{{ ( lookup('url', ( '$select=id,userPrincipalName,userType' | msgraph_list_users ), headers={'Authorization': msgraph_auth_header} ) | from_json ).value }}"
+    roles: "{{ 
+        ( lookup('url', ( azure_subscription_id | az_list_role_definitions ), headers={'Authorization': azure_auth_header} ) | from_json ).value 
+        | json_query('[*].{id:id,name:name,roleName:properties.roleName}')
+      }}"
+    role_assignments: "{{ 
+        ( lookup('url', (azure_subscription_id | az_list_role_assignments ), headers={'Authorization': azure_auth_header} ) | from_json ).value 
+        | json_query('[?properties.principalType==`User`].{
+            id:id,
+            name:name,
+            principalId:properties.principalId,
+            principalType:properties.principalType,
+            roleDefinitionId:properties.roleDefinitionId}'
+          )
+      }}"
+
+  when:
+    - azfcis_section1
+    - azfcis_rule_1_1 or
+      azfcis_rule_1_2 or
+      azfcis_rule_1_3
+  tags:
+    - section1
+    - azfcis_rule_1.1
+    - azfcis_rule_1.2
+    - azfcis_rule_1.3
+
+- name: SETUP | SECTION 1 | Combine Role Assignments with Roles, Users and Strong Authentication Methods
+  set_fact:
+    user_roles: "{{
+        user_roles | default([])
+        | union(
+          [
+            { 'id': item.id }
+            | combine( 
+              { 'role': ( roles | get_list_item('id', item.roleDefinitionId) ) },
+              { 'user': ( users | get_list_item('id', item.principalId) ) },
+              { 
+                'user': { 
+                  'strongAuthenticationMethods': ([
+                    lookup('url', item.principalId | msgraph_user_strong_authentication_method('fido2Methods'), headers={'Authorization': msgraph_auth_header}, split_lines=False) | from_json,
+                    lookup('url', item.principalId | msgraph_user_strong_authentication_method('microsoftAuthenticationMethods'), headers={'Authorization': msgraph_auth_header}, split_lines=False ) | from_json,
+                    lookup('url', item.principalId | msgraph_user_strong_authentication_method('windowsHelloForBusinessMethods'), headers={'Authorization': msgraph_auth_header}, split_lines=False ) | from_json,
+                    lookup('url', item.principalId | msgraph_user_strong_authentication_method('temporaryAccessPassMethods'), headers={'Authorization': msgraph_auth_header}, split_lines=False ) | from_json,
+                    lookup('url', item.principalId | msgraph_user_strong_authentication_method('phoneMethods'), headers={'Authorization': msgraph_auth_header}, split_lines=False ) | from_json,
+                    lookup('url', item.principalId | msgraph_user_strong_authentication_method('emailMethods'), headers={'Authorization': msgraph_auth_header}, split_lines=False ) | from_json,
+                  ] | json_query('[?length(value)>=`1`]'))
+                }
+              },
+              recursive=True
+            )
+          ]
+        )
+      }}"
+  loop: "{{ role_assignments }}"
+
+  when:
+    - azfcis_section1
+    - azfcis_rule_1_1 or
+      azfcis_rule_1_2
+    #- is_buggy
+
+  tags:
+    - section1
+    - azfcis_rule_1.1
+    - azfcis_rule_1.2
+
+
+- name: AUTOMATED | 1.1 | AUDIT | Ensure that multi-factor authentication is enabled for all privileged users
+  block:
+  - name: AUTOMATED | 1.1 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "1.1"
+        level: "1"
+        title: Ensure that multi-factor authentication is enabled for all privileged users
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get Users with Privileged Roles
+    set_fact:
+      privileged_user_roles_with_no_mfa: "{{ 
+        user_roles | default([])
+        | json_query('
+            [?role.roleName==`Owner`||contains(role.roleName,`Contributor`)||contains(role.roleName,`Admin`)] |
+            [?length(user.strongAuthenticationMethods)==`0`]
+          ')
+        }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: "{{ privileged_user_roles_with_no_mfa | length }}"
+          target: "0"
+          status: [ 'pass', 'fail', 'unknown' ]
+          evidence: 
+            privileged_user_roles_with_no_mfa': "{{ privileged_user_roles_with_no_mfa | default([]) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }}
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_1_1
+  tags:
+    - level1
+    - section1
+    - rule_1.1
+
+
+- name: AUTOMATED | 1.2 | AUDIT | Ensure that multi-factor authentication is enabled for all non-privileged users
+  block:
+  - name: AUTOMATED | 1.2 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "1.2"
+        level: "2"
+        title: Ensure that multi-factor authentication is enabled for all non-privileged users
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get Users with Non-privileged Roles
+    set_fact:
+      non_privileged_user_roles_with_no_mfa: "{{ 
+        user_roles | default([])
+        | json_query('
+            [?role.roleName!=`Owner`&&!contains(role.roleName,`Contributor`)&&!contains(role.roleName,`Admin`)] |
+            [?length(user.strongAuthenticationMethods)==`0`]
+          ')
+        | default([])
+        }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: "{{ non_privileged_user_roles_with_no_mfa | length }}"
+          target: "0"
+          status: [ 'pass', 'fail', 'unknown' ]
+          evidence: 
+            non_privileged_user_roles_with_no_mfa: "{{ non_privileged_user_roles_with_no_mfa }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_1_2
+  tags:
+    - level2
+    - section1
+    - rule_1.2
+
+
+- name: MANUAL | 1.3 | AUDIT | Ensure guest users are reviewed on a monthly basis
+  block:
+  - name: MANUAL | 1.3 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "1.3"
+        level: "1"
+        title: Ensure guest users are reviewed on a monthly basis
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get Users with Non-privileged Roles
+    set_fact:
+      guest_users: "{{ users | json_query('[?userType==`Guest`]') }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: "{{ guest_users | length }}"
+          target: "0"
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: 
+            guest_users: "{{ guest_users }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_1_3
+    - is_implemented
+  tags:
+    - level1
+    - section1
+    - rule_1.3
+
+
+- name: MANUAL | 1.4 | AUDIT | Ensure that 'Allow users to remember multi-factor authentication on devices they trust' is 'Disabled'
+  block:
+  - name: MANUAL | 1.4 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "1.4"
+        level: "2"
+        title: Ensure that 'Allow users to remember multi-factor authentication on devices they trust' is 'Disabled'
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: See benchmark rule {{ this_rule.id }} documentation for manual audit and remediation procedures
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_1_4
+    - do_manual
+  tags:
+    - level2
+    - section1
+    - rule_1.4
+
+
+- name: MANUAL | 1.5 | AUDIT | Ensure that 'Number of methods required to reset' is set to '2'
+  block:
+  - name: MANUAL | 1.5 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "1.5"
+        level: "1"
+        title: Ensure that 'Number of methods required to reset' is set to '2'
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: See benchmark rule {{ this_rule.id }} documentation for manual audit and remediation procedures
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_1_5
+    - do_manual
+  tags:
+    - level1
+    - section1
+    - rule_1.5
+
+
+- name: MANUAL | 1.6 | AUDIT | Ensure that 'Number of days before users are asked to re-confirm their authentication information' is not set to "0"
+  block:
+  - name: MANUAL | 1.6 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "1.6"
+        level: "1"
+        title: Ensure that 'Number of days before users are asked to re-confirm their authentication information' is not set to "0"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: See benchmark rule {{ this_rule.id }} documentation for manual audit and remediation procedures
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_1_6
+    - do_manual
+  tags:
+    - level1
+    - section1
+    - rule_1.6
+
+
+- name: MANUAL | 1.7 | AUDIT | Ensure that 'Notify users on password resets?' is set to 'Yes'
+  block:
+  - name: MANUAL | 1.7 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "1.7"
+        level: "1"
+        title: Ensure that 'Notify users on password resets?' is set to 'Yes'
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: See benchmark rule {{ this_rule.id }} documentation for manual audit and remediation procedures
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_1_7
+    - do_manual
+  tags:
+    - level1
+    - section1
+    - rule_1.7
+
+
+- name: MANUAL | 1.8 | AUDIT | Ensure that 'Notify all admins when other admins reset their password?' is set to 'Yes'
+  block:
+  - name: MANUAL | 1.8 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "1.8"
+        level: "2"
+        title: Ensure that 'Notify all admins when other admins reset their password?' is set to 'Yes'
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: See benchmark rule {{ this_rule.id }} documentation for manual audit and remediation procedures
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_1_8
+    - do_manual
+  tags:
+    - level2
+    - section1
+    - rule_1.8
+
+
+- name: MANUAL | 1.9 | AUDIT | Ensure that 'Users can consent to apps accessing company data on their behalf' is set to 'No'
+  block:
+  - name: MANUAL | 1.9 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "1.9"
+        level: "2"
+        title: Ensure that 'Users can consent to apps accessing company data on their behalf' is set to 'No'
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: See benchmark rule {{ this_rule.id }} documentation for manual audit and remediation procedures
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_1_9
+    - do_manual
+  tags:
+    - level2
+    - section1
+    - rule_1.9
+
+
+- name: MANUAL | 1.10 | AUDIT | Ensure that 'Users can add gallery apps to their Access Panel' is set to 'No'
+  block:
+  - name: MANUAL | 1.10 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "1.10"
+        level: "2"
+        title: Ensure that 'Users can add gallery apps to their Access Panel' is set to 'No'
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: See benchmark rule {{ this_rule.id }} documentation for manual audit and remediation procedures
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_1_10
+    - do_manual
+  tags:
+    - level2
+    - section1
+    - rule_1.10
+
+
+- name: MANUAL | 1.11 | AUDIT | Ensure that 'Users can register applications' is set to 'No'
+  block:
+  - name: MANUAL | 1.11 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "1.11"
+        level: "2"
+        title: Ensure that 'Users can register applications' is set to 'No'
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: See benchmark rule {{ this_rule.id }} documentation for manual audit and remediation procedures
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_1_11
+    - do_manual
+  tags:
+    - level2
+    - section1
+    - rule_1.11
+
+
+- name: MANUAL | 1.12 | AUDIT | Ensure that 'Guest user permissions are limited' is set to 'Yes'
+  block:
+  - name: MANUAL | 1.12 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "1.12"
+        level: "2"
+        title: Ensure that 'Guest user permissions are limited' is set to 'Yes'
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: See benchmark rule {{ this_rule.id }} documentation for manual audit and remediation procedures
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_1_12
+    - do_manual
+  tags:
+    - level2
+    - section1
+    - rule_1.12
+
+
+- name: MANUAL | 1.13 | AUDIT | Ensure that 'Members can invite' is set to 'No'
+  block:
+  - name: MANUAL | 1.13 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "1.13"
+        level: "2"
+        title: Ensure that 'Members can invite' is set to 'No'
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: See benchmark rule {{ this_rule.id }} documentation for manual audit and remediation procedures
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_1_13
+    - do_manual
+  tags:
+    - level2
+    - section1
+    - rule_1.13
+
+
+- name: MANUAL | 1.14 | AUDIT | Ensure that 'Guests can invite' is set to 'No'
+  block:
+  - name: MANUAL | 1.14 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "1.14"
+        level: "2"
+        title: Ensure that 'Guests can invite' is set to 'No'
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: See benchmark rule {{ this_rule.id }} documentation for manual audit and remediation procedures
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_1_14
+    - do_manual
+  tags:
+    - level2
+    - section1
+    - rule_1.14
+
+
+- name: MANUAL | 1.15 | AUDIT | Ensure that 'Restrict access to Azure AD administration portal' is set to 'Yes'
+  block:
+  - name: MANUAL | 1.15 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "1.15"
+        level: "1"
+        title: Ensure that 'Restrict access to Azure AD administration portal' is set to 'Yes'
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: See benchmark rule {{ this_rule.id }} documentation for manual audit and remediation procedures
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_1_15
+    - do_manual
+  tags:
+    - level1
+    - section1
+    - rule_1.15
+
+
+- name: MANUAL | 1.16 | AUDIT | Ensure that 'Restrict user ability to access groups features in the Access Pane' is set to 'No'
+  block:
+  - name: MANUAL | 1.16 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "1.16"
+        level: "2"
+        title: Ensure that 'Restrict user ability to access groups features in the Access Pane' is set to 'No'
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: See benchmark rule {{ this_rule.id }} documentation for manual audit and remediation procedures
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_1_16
+    - do_manual
+  tags:
+    - level2
+    - section1
+    - rule_1.16
+
+
+- name: MANUAL | 1.17 | AUDIT | Ensure that 'Users can create security groups in Azure Portals' is set to 'No'
+  block:
+  - name: MANUAL | 1.17 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "1.17"
+        level: "2"
+        title: Ensure that 'Users can create security groups in Azure Portals' is set to 'No'
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: See benchmark rule {{ this_rule.id }} documentation for manual audit and remediation procedures
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_1_17
+    - do_manual
+  tags:
+    - level2
+    - section1
+    - rule_1.17
+
+
+- name: MANUAL | 1.18 | AUDIT | Ensure that 'Owners can manage group membership requests in the Access Panel' is set to 'No'
+  block:
+  - name: MANUAL | 1.18 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "1.18"
+        level: "2"
+        title: Ensure that 'Owners can manage group membership requests in the Access Panel' is set to 'No'
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: See benchmark rule {{ this_rule.id }} documentation for manual audit and remediation procedures
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_1_18
+    - do_manual
+  tags:
+    - level2
+    - section1
+    - rule_1.18
+
+- name: MANUAL | 1.19 | AUDIT | Ensure that 'Users can create Microsoft 365 groups in Azure Portals' is set to 'No'
+  block:
+  - name: MANUAL | 1.19 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "1.19"
+        level: "2"
+        title: Ensure that 'Users can create Microsoft 365 groups in Azure Portals' is set to 'No'
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: See benchmark rule {{ this_rule.id }} documentation for manual audit and remediation procedures
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_1_19
+    - do_manual
+  tags:
+    - level2
+    - section1
+    - rule_1.19
+
+- name: MANUAL | 1.20 | AUDIT | Ensure that 'Require Multi-Factor Auth to join devices' is set to 'Yes'
+  block:
+  - name: MANUAL | 1.20 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "1.20"
+        level: "1"
+        title: Ensure that 'Require Multi-Factor Auth to join devices' is set to 'Yes'
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: See benchmark rule {{ this_rule.id }} documentation for manual audit and remediation procedures
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_1_20
+    - do_manual
+  tags:
+    - level1
+    - section1
+    - rule_1.20
+
+
+- name: AUTOMATED | 1.21 | AUDIT | Ensure that no custom subscription owner roles are created
+  block:
+  - name: MANUAL | 1.21 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "1.21"
+        level: "2"
+        title: Ensure that no custom subscription owner roles are created
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Get Azure Role Definition List
+    command: "az role definition list"
+    register: azure_role_definition_list_raw
+    changed_when: false
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Convert stdout to JSON
+    set_fact:
+      azure_role_definition_list: "{{ azure_role_definition_list_raw.stdout | from_json }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Evidence Query
+    set_fact:
+      evidence_query: "[?contains(permissions[].actions[],`*`) && roleType != `BuiltInRole`]"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Source Query
+    set_fact:
+      source_query: "length({{ evidence_query }})"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: "{{ azure_role_definition_list | json_query(source_query) | int==0 }}"
+          target: true
+          status: ['pass','fail','unknown']
+          evidence: 
+            azure_custom_role_definitions_with_wildcard_actions: "{{ azure_role_definition_list | json_query(evidence_query) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: AUTOMATED | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+  when:
+    - azfcis_rule_1_21
+  tags:
+    - level2
+    - section1
+    - rule_1.21
+
+
+- name: MANUAL | 1.22 | AUDIT | Ensure Security Defaults is enabled on Azure Active Directory
+  block:
+  - name: MANUAL | 1.22 | AUDIT | Set Facts for This Rule
+    set_fact:
+      this_rule:
+        id: "1.22"
+        level: "1"
+        title: Ensure Security Defaults is enabled on Azure Active Directory
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Set Assessment Parameters
+    set_fact:
+      this_rule: 
+        id: "{{ this_rule.id }}"
+        level: "{{ this_rule.level }}"
+        title: "{{ this_rule.title }}"
+        test: 
+          source: Not Available
+          target: Not Available
+          status: [ 'manual', 'manual', 'manual' ]
+          evidence: See benchmark rule {{ this_rule.id }} documentation for manual audit and remediation procedures
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Create Assessment Result
+    set_fact:
+      assessment:
+        - rule-id: "xccdf_org.cisecurity.benchmarks_rule_{{ this_rule.id }}_L{{ this_rule.level }}_{{ this_rule.title | replace(\"'\",'') | replace('\"','') | replace(' ','_') }}"
+          rule-title: "(L{{ this_rule.level }}) {{ this_rule.title }}"
+          result: "{{ ( this_rule.test.source == this_rule.test.target ) | ternary( this_rule.test.status[0], this_rule.test.status[1], this_rule.test.status[2] ) }}"
+          evidence: "{{ this_rule.test.evidence | default(None) }}"
+
+  - name: MANUAL | {{ this_rule.id }} | AUDIT | L{{ this_rule.level }} | {{ this_rule.title }} | Add to CIS Output
+    set_fact:
+      rule_results: "{{ rule_results | default([]) | union(assessment) }}"
+    when: azfcis_write_rule_results
+
+  when:
+    - azfcis_rule_1_22
+    - do_manual
+  tags:
+    - level1
+    - section1
+    - rule_1.22

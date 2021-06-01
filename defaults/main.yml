@@ -1,0 +1,237 @@
+---
+# Disable/Enable whole sections (Default is for all)
+azfcis_section1: true
+azfcis_section2: true
+azfcis_section3: true
+azfcis_section4: true
+azfcis_section5: true
+azfcis_section6: true
+azfcis_section7: true
+azfcis_section8: true
+azfcis_section9: true
+
+# Write rule_results object to JSON file
+azfcis_write_rule_results: true
+
+# Set to false to skip manual steps (steps that have both manual audit and manual patch)
+do_manual: true
+
+# Set to false to skip prereqs 
+check_prereqs: true
+
+# We've defined complexity-high to mean that we cannot automatically remediate
+# the rule in question.  In the future this might mean that the remediation
+# may fail in some cases.
+complexity_high: no
+
+# We've defined disruption-high to indicate items that are likely to cause
+# disruption in a normal workflow.  These items can be remediated automatically
+# but are disabled by default to avoid disruption.
+disruption_high: true
+
+# Show "changed" for disruptive items not remediated per disruption-high
+# setting to make them stand out.
+audit_disruptive: yes
+
+#set to false to skip tasks that either have not been developed or cannot be automated
+is_implemented: false
+
+#set to false to skip tasks that have a bug or error
+is_buggy: false
+
+# These variables correspond with the CIS IDs defined in the CIS and allows you to enable/disable specific rules.
+# PLEASE NOTE: These work in coordination with the cat1, cat2, cat3 group variables. You must enable an entire group
+# in order for the variables below to take effect.
+
+# 121 total
+# These variables correspond with the CIS rule IDs or paragraph numbers defined in
+# the CIS benchmark documents.
+# PLEASE NOTE: These work in coordination with the section # group variables and tags.
+# You must enable an entire section in order for the variables below to take effect.
+# Section 1 rules
+azfcis_rule_1_1: true
+azfcis_rule_1_2: true
+azfcis_rule_1_3: true
+azfcis_rule_1_4: true
+azfcis_rule_1_5: true
+azfcis_rule_1_6: true
+azfcis_rule_1_7: true
+azfcis_rule_1_8: true
+azfcis_rule_1_9: true
+azfcis_rule_1_10: true
+azfcis_rule_1_11: true
+azfcis_rule_1_12: true
+azfcis_rule_1_13: true
+azfcis_rule_1_14: true
+azfcis_rule_1_15: true
+azfcis_rule_1_16: true
+azfcis_rule_1_17: true
+azfcis_rule_1_18: true
+azfcis_rule_1_19: true
+azfcis_rule_1_20: true
+azfcis_rule_1_21: true
+azfcis_rule_1_22: true
+azfcis_rule_1_23: true
+
+# Section 2 rules
+azfcis_rule_2_1: true
+azfcis_rule_2_2: true
+azfcis_rule_2_3: true
+azfcis_rule_2_4: true
+azfcis_rule_2_5: true
+azfcis_rule_2_6: true
+azfcis_rule_2_7: true
+azfcis_rule_2_8: true
+azfcis_rule_2_9: true
+azfcis_rule_2_10: true
+azfcis_rule_2_11: true
+azfcis_rule_2_12: true
+azfcis_rule_2_13: true
+azfcis_rule_2_14: true
+azfcis_rule_2_15: true
+
+# Section 3 rules
+azfcis_rule_3_1: true
+azfcis_rule_3_2: true
+azfcis_rule_3_3: true
+azfcis_rule_3_4: true
+azfcis_rule_3_5: true
+azfcis_rule_3_6: true
+azfcis_rule_3_7: true
+azfcis_rule_3_8: true
+azfcis_rule_3_9: true
+azfcis_rule_3_10: true
+azfcis_rule_3_11: true
+
+# Section 4 rules
+azfcis_rule_4_1_1: true
+azfcis_rule_4_1_2: true
+azfcis_rule_4_1_3: true
+azfcis_rule_4_2_1: true
+azfcis_rule_4_2_2: true
+azfcis_rule_4_2_3: true
+azfcis_rule_4_2_4: true
+azfcis_rule_4_2_5: true
+azfcis_rule_4_3_1: true
+azfcis_rule_4_3_2: true
+azfcis_rule_4_3_3: true
+azfcis_rule_4_3_4: true
+azfcis_rule_4_3_5: true
+azfcis_rule_4_3_6: true
+azfcis_rule_4_3_7: true
+azfcis_rule_4_3_8: true
+azfcis_rule_4_3_9: true
+azfcis_rule_4_4: true
+azfcis_rule_4_5: true
+
+# Section 5 rules
+azfcis_rule_5_1_1: true
+azfcis_rule_5_1_2: true
+azfcis_rule_5_1_3: true
+azfcis_rule_5_1_4: true
+azfcis_rule_5_1_5: true
+azfcis_rule_5_2_1: true
+azfcis_rule_5_2_2: true
+azfcis_rule_5_2_3: true
+azfcis_rule_5_2_4: true
+azfcis_rule_5_2_5: true
+azfcis_rule_5_2_6: true
+azfcis_rule_5_2_7: true
+azfcis_rule_5_2_8: true
+azfcis_rule_5_2_9: true
+azfcis_rule_5_3: true
+
+# Section 6 rules
+azfcis_rule_6_1: true
+azfcis_rule_6_2: true
+azfcis_rule_6_3: true
+azfcis_rule_6_4: true
+azfcis_rule_6_5: true
+azfcis_rule_6_6: true
+
+# Section 7 rules
+azfcis_rule_7_1: true
+azfcis_rule_7_2: true
+azfcis_rule_7_3: true
+azfcis_rule_7_4: true
+azfcis_rule_7_5: true
+azfcis_rule_7_6: true
+azfcis_rule_7_7: true
+
+# Section 8 rules
+azfcis_rule_8_1: true
+azfcis_rule_8_2: true
+azfcis_rule_8_3: true
+azfcis_rule_8_4: true
+azfcis_rule_8_5: true
+
+# Section 9 rules
+azfcis_rule_9_1: true
+azfcis_rule_9_2: true
+azfcis_rule_9_3: true
+azfcis_rule_9_4: true
+azfcis_rule_9_5: true
+azfcis_rule_9_6: true
+azfcis_rule_9_7: true
+azfcis_rule_9_8: true
+azfcis_rule_9_9: true
+azfcis_rule_9_10: true
+azfcis_rule_9_11: true
+
+# Section 2 vars
+# 2.11
+# Security Center emails the subscription owners whenever a high-severity alert is triggered
+# for their subscription. You should provide a security contact email address as an additional
+# email address
+azfcis_security_contacts_email_address: "support@refactr.it"
+
+# Section 3 vars
+# 3.8 
+# Enabling this configuration for azure storage ensures that even if blobs/data were
+# deleted from the storage account, Blobs/data objects remain recoverable for a
+# particular time which set in the "Retention policies" [Retention policies can be 7
+# days to 365 days].
+days_retained: "90"
+
+# Section 4 vars
+# 4.1.1
+# Storage account for storing SQL Server Auditing events
+azfcis_storage_account_resource_id: "/subscriptions/{{ azure_service_principal.subscription_id }}/resourceGroups/AzFoundations/providers/Microsoft.Storage/storageAccounts/ephemeral1"
+
+# 4.1.3
+# Number of days to retain SQL Server Audit Logs
+# (SQL Server Audit Retention should be configured to be greater than 90 days.)
+azfcis_sql_server_auditing_retentionindays: "90"
+
+# 4.2.2
+# Storage account to use for storing Advanced Data Security (ADS) - Vulnerability Assessment (VA) data
+azfcis_sql_ads_va_storage_account: "ephemeral1"
+# Advanced Data Security (ADS) - Vulnerability Assessment (VA) notification email addresses
+azfcis_sql_ads_va_email_list: '@("mail1@mail.com" , "mail2@mail.com")'
+
+# 4.4
+# Azure Active Directory Administrator object ID (preferably a group)
+azfcis_sql_ad_admin_object_id: "a0ef85a6-4d2a-4a96-85f1-7fd8e544f043"
+# Azure Active Directory Administrator Display Name  (preferably a group)
+azfcis_sql_ad_admin_display_name: "Azure SQL Server Admins"
+
+# 4.5 Customer Managed Key ID
+azfcis_sql_server_tde_key_id: "https://ephemeralkeyvault.vault.azure.net/keys/asdf/9a5cb0e0918c415b9cbaa5479dea2f68"
+
+# Section 5 vars
+# 5.1.3
+# the storage container storing the activity logs
+azfcis_activity_logs_storage_container: "ephemeral1"
+
+# 5.2.x
+# Monitoring using Activity Log Alerts Resource Group (this will need to be created for these controls to be implemented)
+azfcis_alert_rule_resource_group: "AzFoundations"
+# Monitoring using Activity Log Alerts Action Group (this will need to be created for these controls to be implemented)
+azfcis_alert_rule_action_group: "AzFoundationsActionGroup"
+
+# Section 8 vars
+# 8.1 & 8.2
+# Expiration date to set for keys and secrets that currently have none
+# (UTC datetime)
+azfcis_keyvault_expiration_date: "2022-01-01'T'12:12:12'Z'"
+

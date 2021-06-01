@@ -1,0 +1,20 @@
+---
+galaxy_info:
+    author: "Ryan Speelman (ryan@refactr.it) and Rick Culpepper (rick@refactr.it)"
+    description: "Ansible playbook with a role to remediate an Azure Tenant based on the CIS_Microsoft_Azure_Foundations_Benchmark_v1.2.0"
+    company: "Refactr"
+    license: MIT
+    min_ansible_version: 2.9
+
+    platforms:
+        - name: Microsoft Azure
+
+    galaxy_tags:
+        - system
+        - security
+        - cis
+        - hardening
+        - azure
+        - benchmark
+
+    dependencies: []
