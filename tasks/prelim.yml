@@ -1,9 +1,9 @@
 ---
 - name: PRELIM | Login to Azure
-  block: 
+  block:
   - name: PRELIM | Login to Azure
     command: >
-      az login 
+      az login
       --username '{{ azure_service_principal.client_id }}'
       --password '{{ azure_service_principal.client_key }}'
       --tenant   '{{ azure_service_principal.tenant_id }}'

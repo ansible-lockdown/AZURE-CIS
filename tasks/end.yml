@@ -2,6 +2,7 @@
   copy:
     content: "{{ rule_results | default([]) | to_nice_json }}"
     dest: "{{ rule_results_path }}"
+    mode: '0644'
   changed_when: false
   when: azfcis_write_rule_results
   tags:

@@ -2,38 +2,38 @@
 
 - name: "SETUP | SECTION 4 | Setup Tasks"
   block:
-  - name: "SETUP | SECTION 4 | Evidence Message"
-    set_fact:
-      exception_evidence_message: "No SQL Servers Exist"
+    - name: "SETUP | SECTION 4 | Evidence Message"
+      set_fact:
+        exception_evidence_message: "No SQL Servers Exist"
 
-  - name: "SETUP | SECTION 4 | Get SQL Server List"
-    command: "az sql server list"
-    register: azure_sql_server_list_raw
-    changed_when: false
+    - name: "SETUP | SECTION 4 | Get SQL Server List"
+      command: "az sql server list"
+      register: azure_sql_server_list_raw
+      changed_when: false
 
-  - name: "SETUP | SECTION 4 | Format SQL Server List"
-    set_fact:
-      azure_sql_server_list: "{{ azure_sql_server_list_raw.stdout | from_json | default([],true) }}"
+    - name: "SETUP | SECTION 4 | Format SQL Server List"
+      set_fact:
+        azure_sql_server_list: "{{ azure_sql_server_list_raw.stdout | from_json | default([],true) }}"
 
-  - name: "SETUP | SECTION 4 | Get SQL Database List"
-    command: "az sql db list --server {{ item.name }} --resource-group {{ item.resourceGroup }}"
-    loop: "{{ azure_sql_server_list }}"
-    register: azure_sql_db_list_raw
-    changed_when: false
+    - name: "SETUP | SECTION 4 | Get SQL Database List"
+      command: "az sql db list --server {{ item.name }} --resource-group {{ item.resourceGroup }}"
+      loop: "{{ azure_sql_server_list }}"
+      register: azure_sql_db_list_raw
+      changed_when: false
 
-  - name: "SETUP | SECTION 4 | Format SQL Database List"
-    set_fact:
-      azure_sql_db_list: '{{ azure_sql_db_list_raw | json_query("results[*].stdout") | map("from_json") | list | json_query("[].id") | default([],true) }}'
+    - name: "SETUP | SECTION 4 | Format SQL Database List"
+      set_fact:
+        azure_sql_db_list: '{{ azure_sql_db_list_raw | json_query("results[*].stdout") | map("from_json") | list | json_query("[].id") | default([],true) }}'
 
-  - name: "SETUP | SECTION 4 | Get SQL Server Audit Policy Show"
-    command: "az sql server audit-policy show --name {{ item.name }} --resource-group {{ item.resourceGroup }}"
-    loop: "{{ azure_sql_server_list }}"
-    register: azure_sql_server_audit_policy_show_raw
-    changed_when: false
+    - name: "SETUP | SECTION 4 | Get SQL Server Audit Policy Show"
+      command: "az sql server audit-policy show --name {{ item.name }} --resource-group {{ item.resourceGroup }}"
+      loop: "{{ azure_sql_server_list }}"
+      register: azure_sql_server_audit_policy_show_raw
+      changed_when: false
 
-  - name: "SETUP | SECTION 4 | Format SQL Server Audit Policy Show"
-    set_fact:
-      azure_sql_server_audit_policy_show: '{{ azure_sql_server_audit_policy_show_raw | json_query("results[*].stdout") | map("from_json") | list | default([],true) }}'
+    - name: "SETUP | SECTION 4 | Format SQL Server Audit Policy Show"
+      set_fact:
+        azure_sql_server_audit_policy_show: '{{ azure_sql_server_audit_policy_show_raw | json_query("results[*].stdout") | map("from_json") | list | default([],true) }}'
 
   when:
     - azfcis_section4
@@ -65,4 +65,3 @@
     - rule_4.2.8
     - rule_4.4
     - rule_4.5
-
